@@ -1,0 +1,304 @@
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --font-size: 16px;
+  --background: #F4F7FB;
+  --foreground: #1F2937;
+  --card: #FFFFFF;
+  --card-foreground: #1F2937;
+  --popover: #FFFFFF;
+  --popover-foreground: #1F2937;
+  --primary: #0F766E;
+  --primary-foreground: #FFFFFF;
+  --secondary: #1E3A5F;
+  --secondary-foreground: #FFFFFF;
+  --muted: #E8EEF6;
+  --muted-foreground: #64748B;
+  --accent: #EEF4FB;
+  --accent-foreground: #1F2937;
+  --destructive: #d4183d;
+  --destructive-foreground: #ffffff;
+  --border: #D6E1EE;
+  --input: transparent;
+  --input-background: #FFFFFF;
+  --switch-background: #C6D3E3;
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --ring: #0F766E;
+  --chart-1: #0F766E;
+  --chart-2: #1E3A5F;
+  --chart-3: #EA580C;
+  --chart-4: #0EA5A4;
+  --chart-5: #2563EB;
+  --radius: 0.75rem;
+  --sidebar: #F8FAFD;
+  --sidebar-foreground: #1F2937;
+  --sidebar-primary: #0F766E;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #EAF1FA;
+  --sidebar-accent-foreground: #1F2937;
+  --sidebar-border: #D6E1EE;
+  --sidebar-ring: #0F766E;
+}
+
+:root[data-theme="atardecer"] {
+  --background: #FFF8F2;
+  --foreground: #35261E;
+  --card: #FFFFFF;
+  --card-foreground: #35261E;
+  --popover: #FFFFFF;
+  --popover-foreground: #35261E;
+  --primary: #CC5A33;
+  --primary-foreground: #FFFFFF;
+  --secondary: #8C3F2F;
+  --secondary-foreground: #FFFFFF;
+  --muted: #F9EBDD;
+  --muted-foreground: #7B6456;
+  --accent: #FFE5CC;
+  --accent-foreground: #35261E;
+  --border: #EED5BC;
+  --input-background: #FFFFFF;
+  --switch-background: #E7C8AF;
+  --ring: #CC5A33;
+  --chart-1: #CC5A33;
+  --chart-2: #8C3F2F;
+  --chart-3: #E49A2C;
+  --chart-4: #C96C50;
+  --chart-5: #5E8E8A;
+  --sidebar: #FFF8EF;
+  --sidebar-foreground: #35261E;
+  --sidebar-primary: #CC5A33;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #FFE5CC;
+  --sidebar-accent-foreground: #35261E;
+  --sidebar-border: #EED5BC;
+  --sidebar-ring: #CC5A33;
+}
+
+:root[data-theme="bosque"] {
+  --background: #F2F8F4;
+  --foreground: #163127;
+  --card: #FFFFFF;
+  --card-foreground: #163127;
+  --popover: #FFFFFF;
+  --popover-foreground: #163127;
+  --primary: #1B7A5A;
+  --primary-foreground: #FFFFFF;
+  --secondary: #27543F;
+  --secondary-foreground: #FFFFFF;
+  --muted: #E3EFE7;
+  --muted-foreground: #4E6A5D;
+  --accent: #DDF2E6;
+  --accent-foreground: #163127;
+  --border: #CBE3D5;
+  --input-background: #FFFFFF;
+  --switch-background: #B8D3C2;
+  --ring: #1B7A5A;
+  --chart-1: #1B7A5A;
+  --chart-2: #27543F;
+  --chart-3: #65A30D;
+  --chart-4: #0D9488;
+  --chart-5: #2563EB;
+  --sidebar: #F3F9F5;
+  --sidebar-foreground: #163127;
+  --sidebar-primary: #1B7A5A;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #DDF2E6;
+  --sidebar-accent-foreground: #163127;
+  --sidebar-border: #CBE3D5;
+  --sidebar-ring: #1B7A5A;
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.145 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.145 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.396 0.141 25.723);
+  --destructive-foreground: oklch(0.637 0.237 25.331);
+  --border: oklch(0.269 0 0);
+  --input: oklch(0.269 0 0);
+  --ring: oklch(0.439 0 0);
+  --font-weight-medium: 500;
+  --font-weight-normal: 400;
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.269 0 0);
+  --sidebar-ring: oklch(0.439 0 0);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-input-background: var(--input-background);
+  --color-switch-background: var(--switch-background);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-body);
+    background-image:
+      radial-gradient(circle at 10% 4%, rgba(15, 118, 110, 0.12), transparent 36%),
+      radial-gradient(circle at 88% 12%, rgba(30, 58, 95, 0.1), transparent 42%),
+      radial-gradient(circle at 52% 100%, rgba(14, 165, 164, 0.08), transparent 50%);
+    background-attachment: fixed;
+  }
+
+  /**
+  * Default typography styles for HTML elements (h1-h4, p, label, button, input).
+  * These are in @layer base, so Tailwind utility classes (like text-sm, text-lg) automatically override them.
+  */
+
+  html {
+    font-size: var(--font-size);
+  }
+
+  h1 {
+    font-size: var(--text-2xl);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+    font-family: var(--font-heading);
+  }
+
+  h2 {
+    font-size: var(--text-xl);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+    font-family: var(--font-heading);
+  }
+
+  h3 {
+    font-size: var(--text-lg);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+    font-family: var(--font-heading);
+  }
+
+  h4 {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+    font-family: var(--font-heading);
+  }
+
+  label {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  button {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-medium);
+    line-height: 1.5;
+  }
+
+  input {
+    font-size: var(--text-base);
+    font-weight: var(--font-weight-normal);
+    line-height: 1.5;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .page-enter {
+      animation: page-enter 220ms ease-out both;
+    }
+
+    .soft-pop {
+      animation: soft-pop 180ms ease-out both;
+    }
+  }
+
+  @keyframes page-enter {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes soft-pop {
+    from {
+      opacity: 0;
+      transform: scale(0.985);
+    }
+
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+}
+
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+}
