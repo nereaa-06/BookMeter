@@ -5,6 +5,7 @@ import { currentUser } from "../data/mockData";
 import { useAuth } from "../auth/AuthProvider";
 import {
   obtenerChatsDelUsuario,
+  obtenerChatDelUsuarioPorId,
   enviarMensajeAlChat,
   escucharCambiosDeChat,
   subirFotoAlChat,
@@ -13,8 +14,11 @@ import {
   restaurarChatOculto,
   borrarTodosLosChats,
   marcarChatComoLeido,
+  esChatNoLeidoParaUsuario,
   type ChatThreadItem,
 } from "../data/chatStorage";
+import { notificarChatNuevo } from "../data/pushNotifications";
+import BookCover from "../components/BookCover";
 
 export default function ChatPage() {
   const { id } = useParams();
@@ -27,7 +31,7 @@ export default function ChatPage() {
       : currentUser.name;
   const avatarUsuarioActual = currentUser.avatar;
 
-  const [message, setMessage] = useState("");
+  const [mensajeTexto, setMensajeTexto] = useState("");
   const [listaChats, setListaChats] = useState<ChatThreadItem[]>([]);
   const [idChatSeleccionado, setIdChatSeleccionado] = useState<string | undefined>(id);
   const [cargandoChats, setCargandoChats] = useState(true);
@@ -37,8 +41,11 @@ export default function ChatPage() {
   const [archivoImagen, setArchivoImagen] = useState<File | null>(null);
   const [previewImagen, setPreviewImagen] = useState<string | null>(null);
   const [errorImagen, setErrorImagen] = useState("");
+  const [avisoPush, setAvisoPush] = useState("");
   const [undoBorradoChat, setUndoBorradoChat] = useState<{ chatId: string; titulo: string } | null>(null);
-  const refFinalMensajes = useRef<HTMLDivElement>(null);
+  const refContenedorMensajes = useRef<HTMLDivElement>(null);
+  const intervaloAutoScrollRef = useRef<number | null>(null);
+  const chatAutoScrollAplicadoRef = useRef<string | null>(null);
   const inputImagenRef = useRef<HTMLInputElement>(null);
   const timeoutUndoRef = useRef<number | null>(null);
 
@@ -67,9 +74,83 @@ export default function ChatPage() {
     }
   }, [idUsuarioActual, id]);
 
-  useEffect(() => {
-    refFinalMensajes.current?.scrollIntoView({ behavior: "smooth" });
-  }, [mensajes]);
+  const sincronizarChatSeleccionado = useCallback(async () => {
+    if (!idChatSeleccionado) {
+      return;
+    }
+
+    const chatActualizado = await obtenerChatDelUsuarioPorId(idChatSeleccionado, idUsuarioActual);
+
+    if (!chatActualizado) {
+      setListaChats((anteriores) => anteriores.filter((chat) => chat.id !== idChatSeleccionado));
+      return;
+    }
+
+    setListaChats((anteriores) => {
+      const existe = anteriores.some((chat) => chat.id === chatActualizado.id);
+
+      if (!existe) {
+        return [chatActualizado, ...anteriores];
+      }
+
+      return anteriores
+        .map((chat) => (chat.id === chatActualizado.id ? chatActualizado : chat))
+        .sort((a, b) => {
+          const tiempoA = a.messages[a.messages.length - 1]?.timestamp?.getTime() ?? 0;
+          const tiempoB = b.messages[b.messages.length - 1]?.timestamp?.getTime() ?? 0;
+          return tiempoB - tiempoA;
+        });
+    });
+  }, [idChatSeleccionado, idUsuarioActual]);
+
+  const sincronizarChatPorId = useCallback(
+    async (chatId?: string) => {
+      if (!chatId) {
+        return sincronizarChatSeleccionado();
+      }
+
+      const chatActualizado = await obtenerChatDelUsuarioPorId(chatId, idUsuarioActual);
+
+      if (!chatActualizado) {
+        setListaChats((anteriores) => anteriores.filter((chat) => chat.id !== chatId));
+        return;
+      }
+
+      setListaChats((anteriores) => {
+        const existe = anteriores.some((chat) => chat.id === chatActualizado.id);
+
+        if (!existe) {
+          return [chatActualizado, ...anteriores];
+        }
+
+        return anteriores
+          .map((chat) => (chat.id === chatActualizado.id ? chatActualizado : chat))
+          .sort((a, b) => {
+            const tiempoA = a.messages[a.messages.length - 1]?.timestamp?.getTime() ?? 0;
+            const tiempoB = b.messages[b.messages.length - 1]?.timestamp?.getTime() ?? 0;
+            return tiempoB - tiempoA;
+          });
+      });
+    },
+    [idUsuarioActual, sincronizarChatSeleccionado]
+  );
+
+  const irAlFinalMensajes = (behavior: ScrollBehavior = "smooth") => {
+    const contenedor = refContenedorMensajes.current;
+    if (!contenedor) {
+      return;
+    }
+
+    if (behavior === "auto") {
+      contenedor.scrollTop = contenedor.scrollHeight;
+      return;
+    }
+
+    contenedor.scrollTo({
+      top: contenedor.scrollHeight,
+      behavior,
+    });
+  };
 
   useEffect(() => {
     return () => {
@@ -80,6 +161,10 @@ export default function ChatPage() {
       if (timeoutUndoRef.current !== null) {
         window.clearTimeout(timeoutUndoRef.current);
       }
+
+      if (intervaloAutoScrollRef.current !== null) {
+        window.clearInterval(intervaloAutoScrollRef.current);
+      }
     };
   }, [previewImagen]);
 
@@ -88,20 +173,61 @@ export default function ChatPage() {
   }, [cargarChats]);
 
   useEffect(() => {
-    const unsubscribe = escucharCambiosDeChat(() => {
-      void cargarChats(false);
+    const unsubscribe = escucharCambiosDeChat((detalle) => {
+      void sincronizarChatPorId(detalle?.chatId);
     });
 
     return () => {
       unsubscribe();
     };
-  }, [cargarChats]);
+  }, [sincronizarChatPorId]);
 
   useEffect(() => {
     if (id) {
       setIdChatSeleccionado(id);
+      chatAutoScrollAplicadoRef.current = null;
     }
   }, [id]);
+
+  useEffect(() => {
+    if (!chatActual?.id) {
+      return;
+    }
+
+    if (chatAutoScrollAplicadoRef.current === chatActual.id) {
+      return;
+    }
+
+    if (mensajes.length === 0) {
+      return;
+    }
+
+    let intentos = 0;
+    const maxIntentos = 8;
+
+    const intentar = () => {
+      irAlFinalMensajes("auto");
+      intentos += 1;
+
+      if (intentos >= maxIntentos) {
+        chatAutoScrollAplicadoRef.current = chatActual.id;
+        if (intervaloAutoScrollRef.current !== null) {
+          window.clearInterval(intervaloAutoScrollRef.current);
+          intervaloAutoScrollRef.current = null;
+        }
+      }
+    };
+
+    intentar();
+    intervaloAutoScrollRef.current = window.setInterval(intentar, 80);
+
+    return () => {
+      if (intervaloAutoScrollRef.current !== null) {
+        window.clearInterval(intervaloAutoScrollRef.current);
+        intervaloAutoScrollRef.current = null;
+      }
+    };
+  }, [chatActual?.id, mensajes.length]);
 
   useEffect(() => {
     if (!chatActual?.id) {
@@ -112,7 +238,7 @@ export default function ChatPage() {
   }, [chatActual?.id, idUsuarioActual]);
 
   const enviarMensaje = async () => {
-    const texto = message.trim();
+    const texto = mensajeTexto.trim();
     if (!idChatSeleccionado || enviandoMensaje || (!texto && !archivoImagen)) {
       return;
     }
@@ -155,7 +281,12 @@ export default function ChatPage() {
       })
     );
 
-    setMessage("");
+    const frame = window.requestAnimationFrame(() => {
+      irAlFinalMensajes("smooth");
+    });
+    window.setTimeout(() => window.cancelAnimationFrame(frame), 500);
+
+    setMensajeTexto("");
     setArchivoImagen(null);
     if (previewImagen) {
       URL.revokeObjectURL(previewImagen);
@@ -170,6 +301,23 @@ export default function ChatPage() {
       name: nombreUsuarioActual,
       avatar: avatarUsuarioActual,
     });
+
+    if (chatActual?.otherUser?.id && chatActual?.book?.title) {
+      const resultadoPush = await notificarChatNuevo({
+        recipientUserId: chatActual.otherUser.id,
+        senderName: nombreUsuarioActual,
+        bookTitle: chatActual.book.title,
+        preview: texto || (imageUrlFinal ? "Imagen" : "Nuevo mensaje"),
+      });
+
+      if (!resultadoPush.ok) {
+        setAvisoPush(`Mensaje enviado, pero falló la push: ${resultadoPush.error || "error desconocido"}`);
+      } else if (resultadoPush.sent === 0) {
+        setAvisoPush("Mensaje enviado, pero el otro móvil no tiene push activo todavía.");
+      } else {
+        setAvisoPush("");
+      }
+    }
 
     if (chatIdReal && chatIdReal !== idChatSeleccionado) {
       setIdChatSeleccionado(chatIdReal);
@@ -294,14 +442,14 @@ export default function ChatPage() {
     }
   };
 
-  const formatTime = (date: Date) => {
+  const formatearHora = (date: Date) => {
     return new Intl.DateTimeFormat("es-ES", {
       hour: "2-digit",
       minute: "2-digit",
     }).format(date);
   };
 
-  const obtenerPreviewMensaje = (chat: ChatThreadItem): string => {
+  const obtenerResumenMensaje = (chat: ChatThreadItem): string => {
     const ultimoMensaje = chat.messages[chat.messages.length - 1];
     if (!ultimoMensaje) {
       return "Sin mensajes todavía";
@@ -318,10 +466,25 @@ export default function ChatPage() {
     return ultimoMensaje.text;
   };
 
+  const volverAtrasEnChat = () => {
+    navigate("/chat", { replace: true });
+  };
+
   if (cargandoChats) {
     return (
       <div className="flex-1 flex items-center justify-center pb-16">
         <div className="text-muted-foreground">Cargando chats...</div>
+      </div>
+    );
+  }
+
+  if (!chatActual && idChatSeleccionado) {
+    return (
+      <div className="flex-1 flex items-center justify-center pb-16 px-6 page-enter">
+        <div className="text-center space-y-2">
+          <div className="text-foreground">Abriendo chat...</div>
+          <div className="text-sm text-muted-foreground">Espera un momento</div>
+        </div>
       </div>
     );
   }
@@ -339,22 +502,6 @@ export default function ChatPage() {
             className="text-primary hover:underline"
           >
             Ir al mapa
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!chatActual && idChatSeleccionado) {
-    return (
-      <div className="flex-1 flex items-center justify-center pb-16">
-        <div className="text-center">
-          <h3 className="text-foreground mb-2">Chat no encontrado</h3>
-          <button
-            onClick={() => navigate("/")}
-            className="text-primary hover:underline"
-          >
-            Volver al inicio
           </button>
         </div>
       </div>
@@ -387,27 +534,36 @@ export default function ChatPage() {
                 setIdChatSeleccionado(chatItem.id);
                 navigate(`/chat/${chatItem.id}`);
               }}
-              className="w-full p-3 rounded-2xl transition-all hover:bg-accent/90 bg-card border border-border shadow-sm hover:shadow-md"
+              className={`w-full p-3 rounded-2xl transition-all hover:bg-accent/90 bg-card border shadow-sm hover:shadow-md ${
+                esChatNoLeidoParaUsuario(idUsuarioActual, chatItem)
+                  ? "border-primary/40 bg-primary/5"
+                  : "border-border"
+              }`}
             >
               <div className="flex items-start gap-2 text-left">
-                <img
+                <BookCover
                   src={chatItem.book.cover}
                   alt={chatItem.book.title}
-                  className="w-10 h-14 object-cover rounded-md shadow-sm shrink-0"
+                  className="w-10 h-14 object-cover"
+                  containerClassName="w-10 h-14 rounded-md shadow-sm shrink-0"
                 />
 
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs text-foreground truncate">{chatItem.otherUser.name}</p>
+                    <p className={`text-xs truncate ${esChatNoLeidoParaUsuario(idUsuarioActual, chatItem) ? "text-foreground font-semibold" : "text-foreground"}`}>
+                      {chatItem.otherUser.name}
+                    </p>
                     <span className="text-[10px] text-muted-foreground shrink-0">
                       {chatItem.messages.length > 0
-                        ? formatTime(chatItem.messages[chatItem.messages.length - 1].timestamp)
+                        ? formatearHora(chatItem.messages[chatItem.messages.length - 1].timestamp)
                         : ""}
                     </span>
                   </div>
-                  <p className="text-[11px] text-secondary/80 truncate">{chatItem.book.title}</p>
-                  <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                    {obtenerPreviewMensaje(chatItem)}
+                  <p className={`text-[11px] truncate ${esChatNoLeidoParaUsuario(idUsuarioActual, chatItem) ? "text-secondary font-semibold" : "text-secondary/80"}`}>
+                    {chatItem.book.title}
+                  </p>
+                  <p className={`text-[10px] truncate mt-0.5 ${esChatNoLeidoParaUsuario(idUsuarioActual, chatItem) ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                    {obtenerResumenMensaje(chatItem)}
                   </p>
                   {chatItem.tieneMatch && (
                     <span className="inline-flex mt-1 text-[10px] px-1.5 py-0.5 rounded-md bg-primary/15 text-primary">
@@ -440,20 +596,21 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col h-dvh overflow-hidden pb-16 bg-background page-enter">
-      <header className="bg-gradient-to-r from-secondary to-primary shadow-md px-4 py-3">
+    <div className="relative h-[calc(100dvh-4rem)] overflow-hidden bg-background page-enter">
+      <header className="absolute top-0 left-0 right-0 z-30 bg-gradient-to-r from-secondary to-primary shadow-md px-4 py-3 pt-[calc(env(safe-area-inset-top)+1rem)]">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate("/chat")}
+            onClick={volverAtrasEnChat}
             className="p-2 hover:bg-white/10 rounded-lg transition-colors text-white"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
 
-          <img
+          <BookCover
             src={chatActual.book.cover}
             alt={chatActual.book.title}
-            className="w-10 h-14 object-cover rounded shadow-sm"
+            className="w-10 h-14 object-cover"
+            containerClassName="w-10 h-14 rounded shadow-sm"
           />
 
           <div className="flex-1 min-w-0">
@@ -481,7 +638,16 @@ export default function ChatPage() {
         </div>
       </header>
 
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 py-5 space-y-4 bg-gradient-to-b from-transparent via-accent/10 to-accent/20">
+      <div
+        ref={refContenedorMensajes}
+        className="absolute left-0 right-0 overflow-y-auto px-4 py-5 space-y-4 bg-gradient-to-b from-transparent via-accent/10 to-accent/20"
+        style={{
+          top: "calc(5.25rem + env(safe-area-inset-top))",
+          bottom: "calc(5.25rem + env(safe-area-inset-bottom))",
+          WebkitOverflowScrolling: "touch",
+          touchAction: "auto",
+        }}
+      >
         {mensajes.map((msg) => {
           const esMio = msg.senderId === idUsuarioActual;
           return (
@@ -515,17 +681,16 @@ export default function ChatPage() {
                     {msg.text && <p className="text-sm leading-relaxed">{msg.text}</p>}
                   </div>
                   <span className="text-xs text-muted-foreground mt-1 block px-2">
-                    {formatTime(msg.timestamp)}
+                    {formatearHora(msg.timestamp)}
                   </span>
                 </div>
               </div>
             </div>
           );
         })}
-        <div ref={refFinalMensajes} />
       </div>
 
-      <div className="shrink-0 px-4 py-3 bg-card/95 backdrop-blur border-t border-border pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(15,23,42,0.06)]">
+      <div className="absolute left-0 right-0 bottom-0 z-20 px-4 py-3 bg-card/95 border-t border-border pb-[calc(0.75rem+env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(15,23,42,0.06)]">
         {previewImagen && (
           <div className="mb-3 relative w-28 rounded-xl p-1 bg-accent/60 border border-border">
             <img
@@ -544,6 +709,7 @@ export default function ChatPage() {
         )}
 
         {errorImagen && <p className="text-xs text-destructive mb-2">{errorImagen}</p>}
+        {avisoPush && <p className="text-xs text-amber-700 mb-2">{avisoPush}</p>}
 
         <div className="flex gap-2">
           <input
@@ -563,8 +729,8 @@ export default function ChatPage() {
           <input
             type="text"
             placeholder="Escribe un mensaje..."
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            value={mensajeTexto}
+            onChange={(e) => setMensajeTexto(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void enviarMensaje()}
             className="flex-1 px-4 py-2.5 bg-white border border-border rounded-full outline-none focus:ring-2 focus:ring-primary/25 shadow-sm"
           />
@@ -572,7 +738,7 @@ export default function ChatPage() {
             onClick={() => {
               void enviarMensaje();
             }}
-            disabled={(!message.trim() && !archivoImagen) || enviandoMensaje}
+            disabled={(!mensajeTexto.trim() && !archivoImagen) || enviandoMensaje}
             className="p-3 bg-primary text-primary-foreground rounded-full hover:opacity-90 hover:shadow-lg transition-all shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
           >
             <Send className="w-5 h-5" />

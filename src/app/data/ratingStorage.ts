@@ -2,14 +2,14 @@ import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 
 const RATING_STORAGE_KEY = "bookmeter-ratings";
 
-type ValoracionLocal = {
+type CalificacionLocal = {
   valoradoId: string;
   valoradorId: string;
   puntuacion: number;
   actualizadoEn: string;
 };
 
-type ValoracionRemota = {
+type CalificacionRemota = {
   valorado_id: string;
   valorador_id: string;
   puntuacion: number;
@@ -24,7 +24,7 @@ function normalizarPuntuacion(puntuacion: number): number {
   return Math.max(1, Math.min(5, Math.round(puntuacion)));
 }
 
-function leerValoracionesLocales(): ValoracionLocal[] {
+function leerValoracionesLocales(): CalificacionLocal[] {
   if (typeof window === "undefined") {
     return [];
   }
@@ -40,12 +40,12 @@ function leerValoracionesLocales(): ValoracionLocal[] {
       return [];
     }
 
-    return parsed.filter((item): item is ValoracionLocal => {
+    return parsed.filter((item): item is CalificacionLocal => {
       if (!item || typeof item !== "object") {
         return false;
       }
 
-      const valoracion = item as Partial<ValoracionLocal>;
+      const valoracion = item as Partial<CalificacionLocal>;
       return typeof valoracion.valoradoId === "string"
         && typeof valoracion.valoradorId === "string"
         && typeof valoracion.puntuacion === "number";
@@ -55,7 +55,7 @@ function leerValoracionesLocales(): ValoracionLocal[] {
   }
 }
 
-function guardarValoracionesLocales(valoraciones: ValoracionLocal[]) {
+function guardarValoracionesLocales(valoraciones: CalificacionLocal[]) {
   if (typeof window === "undefined") {
     return;
   }
@@ -150,7 +150,7 @@ export async function guardarValoracionUsuario(
           valorador_id: valoradorId,
           valorado_id: valoradoId,
           puntuacion: puntuacionFinal,
-        } satisfies ValoracionRemota,
+        } satisfies CalificacionRemota,
         { onConflict: "valorador_id,valorado_id" }
       );
 

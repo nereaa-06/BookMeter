@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "743024046080",
+    "project_id": "bookmeter-5252e",
+    "storage_bucket": "bookmeter-5252e.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:743024046080:android:27f29131f9c657ffed68e5",
+        "android_client_info": {
+          "package_name": "com.bookmeter.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBzTj26TNhwu3YShT5nqi7hQPBLXbhC_CE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

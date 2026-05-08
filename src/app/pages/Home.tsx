@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { LocateFixed, MessageCircle, Search, Heart } from "lucide-react";
+import { Geolocation } from "@capacitor/geolocation";
 import { currentUser } from "../data/mockData";
 import type { Book } from "../data/mockData";
 import { obtenerTodosLosLibros, suscribirseACambiosDeLibros } from "../data/bookStorage";
+import BookCover from "../components/BookCover";
 import Map, { Marker, Source, Layer } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { crearOAbrirChatPorLibro } from "../data/chatStorage";
@@ -25,6 +27,7 @@ import {
   obtenerFavoritosUsuario,
   suscribirseACambiosDeFavoritos,
 } from "../data/favoritesStorage";
+import { calcularDistanciaKm } from "../lib/geoUtils";
 
 function sacarSemillaDelId(id: string): number {
   let hash = 0;
@@ -46,10 +49,6 @@ function sacarUbicacionAproximada(location: PosicionUsuario, id: string): Posici
     lat: location.lat + latOffset,
     lng: location.lng + lngOffset,
   };
-}
-
-function toRadians(value: number): number {
-  return (value * Math.PI) / 180;
 }
 
 function generarCirculoGeoJSON(
@@ -91,22 +90,6 @@ function generarCirculoGeoJSON(
       coordinates: [puntos],
     },
   };
-}
-
-
-function calcularDistanciaKm(from: PosicionUsuario, to: PosicionUsuario): number {
-  const earthRadiusKm = 6371;
-  const latDiff = toRadians(to.lat - from.lat);
-  const lngDiff = toRadians(to.lng - from.lng);
-  const fromLat = toRadians(from.lat);
-  const toLat = toRadians(to.lat);
-
-  const a =
-    Math.sin(latDiff / 2) * Math.sin(latDiff / 2) +
-    Math.sin(lngDiff / 2) * Math.sin(lngDiff / 2) * Math.cos(fromLat) * Math.cos(toLat);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Math.round(earthRadiusKm * c * 10) / 10;
 }
 
 function normalizarTexto(texto: unknown): string {
@@ -279,7 +262,7 @@ export default function Home() {
         return textoCompleto.includes(terminoNormalizado);
       });
 
-      return coincideTexto && cumpleRango;
+      return coincideTexto;
     });
   }, [activarFiltroBuscados, filtroEstado, librosConDistancia, distancia, sinRango, terminosBuscados, textoBusqueda, usuarioActual.id]);
 
@@ -318,39 +301,16 @@ export default function Home() {
   };
 
   const pedirUbicacionUsuario = (reabrirPestanaSiFalla = true, centrarMapa = false) => {
-    if (!navigator.geolocation) {
-      setErrorUbicacion("Este dispositivo o navegador no soporta geolocalización.");
-      setMostrarPestanaUbicacion(true);
-      return;
-    }
-
-    if (!contextoSeguro) {
-      setPermisoUbicacionDenegado(false);
-      setErrorUbicacion(
-        "La ubicación solo funciona en conexión segura (HTTPS) o en localhost. Abre la app en un origen seguro para que salga el permiso real."
-      );
-      setMostrarPestanaUbicacion(true);
-      return;
-    }
-
+    setBuscandoUbicacion(true);
     setPermisoUbicacionDenegado(false);
     setErrorUbicacion("");
-    setBuscandoUbicacion(true);
 
-    const aplicarPosicion = (position: GeolocationPosition) => {
-      const nuevaLat = position.coords.latitude;
-      const nuevaLng = position.coords.longitude;
-
-      setPosicionUsuario({
-        lat: nuevaLat,
-        lng: nuevaLng,
-      });
-
+    const aplicarPosicion = (lat: number, lng: number) => {
+      setPosicionUsuario({ lat, lng });
       if (centrarMapa) {
-        setCentroMapa([nuevaLat, nuevaLng]);
+        setCentroMapa([lat, lng]);
         setZoomMapa((zoomActual) => Math.max(zoomActual, 13));
       }
-
       guardarPreferenciaPermisoUbicacion("aceptado");
       setPermisoUbicacionDenegado(false);
       setErrorUbicacion("");
@@ -358,45 +318,50 @@ export default function Home() {
       setBuscandoUbicacion(false);
     };
 
-    const manejarErrorFinal = (error: GeolocationPositionError) => {
-      if (error.code === 1) {
-        guardarPreferenciaPermisoUbicacion("denegado");
-        setPermisoUbicacionDenegado(true);
-        setErrorUbicacion(
-          "Has bloqueado el permiso. Revisa Ajustes del navegador > Permisos del sitio > Ubicación y vuelve a permitir."
-        );
-      } else {
-        setPermisoUbicacionDenegado(false);
-        setErrorUbicacion("No se pudo obtener tu ubicación exacta. Mostramos una aproximada.");
-      }
-
+    const manejarErrorFinal = (error: string) => {
+      guardarPreferenciaPermisoUbicacion("denegado");
+      setPermisoUbicacionDenegado(true);
+      setErrorUbicacion(error);
       if (reabrirPestanaSiFalla) {
         setMostrarPestanaUbicacion(true);
       }
-
       setBuscandoUbicacion(false);
     };
 
-    const intentarModoRapido = () => {
-      navigator.geolocation.getCurrentPosition(
-        aplicarPosicion,
-        manejarErrorFinal,
-        { enableHighAccuracy: false, timeout: 12000, maximumAge: 60000 }
-      );
-    };
-
-    navigator.geolocation.getCurrentPosition(
-      aplicarPosicion,
-      (error) => {
-        if (error.code === 3 || error.code === 2) {
-          intentarModoRapido();
+    // Intentar con Capacitor Geolocation (nativo en Android/iOS)
+    Geolocation.requestPermissions()
+      .then((permisos) => {
+        if (permisos.location !== "granted" && permisos.coarseLocation !== "granted") {
+          manejarErrorFinal("Has bloqueado el permiso de ubicación. Revisa Ajustes.");
           return;
         }
 
-        manejarErrorFinal(error);
-      },
-      { enableHighAccuracy: true, timeout: 9000, maximumAge: 0 }
-    );
+        return Geolocation.getCurrentPosition({ enableHighAccuracy: true })
+          .then((position) => {
+            aplicarPosicion(position.coords.latitude, position.coords.longitude);
+          });
+      })
+      .catch(() => {
+        // Fallback a navigator.geolocation si Capacitor falla
+        if (!navigator.geolocation) {
+          manejarErrorFinal("Este dispositivo no soporta geolocalización.");
+          return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            aplicarPosicion(position.coords.latitude, position.coords.longitude);
+          },
+          (error) => {
+            const mensajeError =
+              error.code === 1
+                ? "Has bloqueado el permiso de ubicación. Revisa Ajustes."
+                : "No se pudo obtener tu ubicación.";
+            manejarErrorFinal(mensajeError);
+          },
+          { enableHighAccuracy: true, timeout: 9000, maximumAge: 0 }
+        );
+      });
   };
 
   const permitirUbicacion = () => {
@@ -408,64 +373,16 @@ export default function Home() {
   };
 
   useEffect(() => {
-    const prepararSolicitudUbicacion = async () => {
-      if (!navigator.geolocation) {
-        setErrorUbicacion("Este dispositivo o navegador no soporta geolocalización.");
-        setMostrarPestanaUbicacion(true);
-        return;
-      }
-
-      if (!contextoSeguro) {
-        setPermisoUbicacionDenegado(false);
-        setErrorUbicacion(
-          "Conexión no segura detectada. Para pedir permiso real de ubicación, usa HTTPS o localhost."
-        );
-        setMostrarPestanaUbicacion(true);
-        return;
-      }
-
-      const preferenciaGuardada = obtenerPreferenciaPermisoUbicacion();
-
-      if (!navigator.permissions) {
-        if (preferenciaGuardada === "aceptado") {
-          pedirUbicacionUsuario(false);
-          return;
-        }
-        setMostrarPestanaUbicacion(true);
-        return;
-      }
-
-      try {
-        const estadoPermiso = await navigator.permissions.query({ name: "geolocation" });
-        if (estadoPermiso.state === "granted") {
-          guardarPreferenciaPermisoUbicacion("aceptado");
-          pedirUbicacionUsuario(false, false);
-          return;
-        }
-
-        if (estadoPermiso.state === "prompt") {
-          if (preferenciaGuardada === "aceptado") {
-            pedirUbicacionUsuario(false, false);
-            return;
-          }
-          setMostrarPestanaUbicacion(true);
-          return;
-        }
-
-        guardarPreferenciaPermisoUbicacion("denegado");
-        setPermisoUbicacionDenegado(true);
-        setMostrarPestanaUbicacion(true);
-      } catch {
-        if (preferenciaGuardada === "aceptado") {
-          pedirUbicacionUsuario(false, false);
-          return;
-        }
-        setMostrarPestanaUbicacion(true);
-      }
-    };
-
-    void prepararSolicitudUbicacion();
-  }, [contextoSeguro]);
+    const preferenciaGuardada = obtenerPreferenciaPermisoUbicacion();
+    
+    // Si el usuario ya autorizó antes, pedir ubicación automáticamente
+    if (preferenciaGuardada === "aceptado") {
+      pedirUbicacionUsuario(false, false);
+    } else {
+      // Si es la primera vez o fue denegado, mostrar el diálogo
+      setMostrarPestanaUbicacion(true);
+    }
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -601,10 +518,11 @@ export default function Home() {
                       to={`/book/${book.id}`}
                       className="flex items-center gap-2 px-3 py-2 hover:bg-accent transition-colors"
                     >
-                      <img
+                      <BookCover
                         src={book.cover}
                         alt={book.title}
-                        className="w-8 h-12 rounded object-cover border border-border/70"
+                        className="w-8 h-12 object-cover"
+                        containerClassName="w-8 h-12 rounded border border-border/70"
                       />
                       <div className="min-w-0 flex-1">
                         <p className="text-xs text-foreground truncate">{book.title}</p>
@@ -905,10 +823,11 @@ export default function Home() {
                             <Heart className={`w-4 h-4 ${favoritosIds.has(book.id) ? "fill-current" : ""}`} />
                           </button>
                         <Link to={`/book/${book.id}`} className="flex gap-3">
-                          <img
+                          <BookCover
                             src={book.cover}
                             alt={book.title}
-                            className="w-16 h-24 object-cover rounded-lg shadow-sm"
+                            className="w-16 h-24 object-cover"
+                            containerClassName="w-16 h-24 rounded-lg shadow-sm"
                           />
                           <div className="flex-1 min-w-0">
                             <h4 className="text-foreground truncate">{book.title}</h4>

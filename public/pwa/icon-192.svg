@@ -1,0 +1,12 @@
+<svg width="192" height="192" viewBox="0 0 192 192" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="192" height="192" rx="42" fill="#0F766E"/>
+  <circle cx="96" cy="96" r="58" fill="#FFFFFF" opacity="0.08"/>
+  <path d="M57 66C57 59.9249 61.9249 55 68 55H122C128.075 55 133 59.9249 133 66V126C133 132.075 128.075 137 122 137H68C61.9249 137 57 132.075 57 126V66Z" fill="#FFFFFF"/>
+  <path d="M68 68H116C119.314 68 122 70.6863 122 74V118C122 121.314 119.314 124 116 124H68C64.6863 124 62 121.314 62 118V74C62 70.6863 64.6863 68 68 68Z" fill="#EEF4FB"/>
+  <path d="M68 68H113C118.523 68 123 72.4772 123 78V116C123 121.523 118.523 126 113 126H68C64.6863 126 62 123.314 62 120V74C62 70.6863 64.6863 68 68 68Z" fill="#F8FBFD" opacity="0.7"/>
+  <path d="M73 82H113" stroke="#0F766E" stroke-width="7" stroke-linecap="round"/>
+  <path d="M73 98H105" stroke="#1E3A5F" stroke-width="7" stroke-linecap="round"/>
+  <path d="M73 114H109" stroke="#CC5A33" stroke-width="7" stroke-linecap="round"/>
+  <path d="M111 58V134" stroke="#0F766E" stroke-width="7" stroke-linecap="round"/>
+  <path d="M112 58V134" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" opacity="0.8"/>
+</svg>

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, Link, useLocation } from "react-router";
 import { ArrowLeft, Star, MapPin, Settings, Palette, Heart } from "lucide-react";
+import { Capacitor } from "@capacitor/core";
 import { currentUser } from "../data/mockData";
 import type { Book, User as BookMeterUser } from "../data/mockData";
 import { obtenerTodosLosLibros, obtenerBibliotecaDelUsuario, eliminarLibroSubido } from "../data/bookStorage";
+import BookCover from "../components/BookCover";
 import { useAuth } from "../auth/AuthProvider";
 import { obtenerUsuarioDeSesion } from "../auth/userProfile";
 import { supabase } from "../../lib/supabase";
@@ -27,6 +29,13 @@ import {
   suscribirseACambiosDeFavoritos,
 } from "../data/favoritesStorage";
 import {
+  guardarPreferenciasNotificaciones,
+  obtenerPreferenciasNotificaciones,
+  solicitarPermisoNotificaciones,
+  type NotificationPreferences,
+} from "../data/notificationStorage";
+import { registrarDispositivoPush } from "../data/pushNotifications";
+import {
   guardarValoracionUsuario,
   obtenerResumenValoracionesUsuario,
   obtenerValoracionDeUsuarioSobreOtro,
@@ -37,7 +46,7 @@ type PerfilNavegado = {
   user?: Partial<BookMeterUser> & { id: string };
 };
 
-type GoogleBooksItem = {
+type ItemGoogleBooks = {
   volumeInfo?: {
     title?: string;
     authors?: string[];
@@ -53,6 +62,14 @@ type PreferenciaLibro = {
   author: string;
   cover: string;
 };
+
+function normalizarUrlPortada(url?: string): string {
+  if (!url) {
+    return "";
+  }
+
+  return url.replace(/^http:\/\//i, "https://");
+}
 
 function convertirAUsuarioPerfil(usuario: Partial<BookMeterUser> & { id: string }): BookMeterUser {
   return {
@@ -76,7 +93,7 @@ export default function Profile() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { usuario: usuarioSesion, cerrarSesion, actualizarCorreo, actualizarContrasena } = useAuth();
+  const { usuario: usuarioSesion, cerrarSesion, actualizarCorreo } = useAuth();
   const [librosUsuario, setLibrosUsuario] = useState<Book[]>([]);
   const [todosLosLibros, setTodosLosLibros] = useState<Book[]>([]);
   const [cargandoLibros, setCargandoLibros] = useState(true);
@@ -106,12 +123,12 @@ export default function Profile() {
   const [temaColorActual, setTemaColorActual] = useState<TemaColor>("moderno");
   const [mostrarSelectorTema, setMostrarSelectorTema] = useState(false);
   const [favoritosVersion, setFavoritosVersion] = useState(0);
-  const [nuevoCorreo, setNuevoCorreo] = useState("");
-  const [nuevaContrasena, setNuevaContrasena] = useState("");
-  const [confirmarNuevaContrasena, setConfirmarNuevaContrasena] = useState("");
-  const [guardandoCuenta, setGuardandoCuenta] = useState(false);
-  const [mensajeCuenta, setMensajeCuenta] = useState("");
-  const [errorCuenta, setErrorCuenta] = useState("");
+  
+  const [preferenciasNotificaciones, setPreferenciasNotificaciones] = useState<NotificationPreferences>(
+    obtenerPreferenciasNotificaciones()
+  );
+  const [mensajePush, setMensajePush] = useState("");
+  const [habilitandoPush, setHabilitandoPush] = useState(false);
   const inputAvatarRef = useRef<HTMLInputElement>(null);
   const timeoutDescripcionGuardadaRef = useRef<number | null>(null);
 
@@ -140,13 +157,10 @@ export default function Profile() {
   useEffect(() => {
     setRangoBusquedaPredeterminado(obtenerRangoBusquedaPredeterminado());
     setTemaColorActual(obtenerTemaColorGuardado());
+    setPreferenciasNotificaciones(obtenerPreferenciasNotificaciones());
   }, []);
 
-  useEffect(() => {
-    if (usuarioSesion?.email) {
-      setNuevoCorreo(usuarioSesion.email);
-    }
-  }, [usuarioSesion?.email]);
+  
 
   useEffect(() => {
     const desuscribir = suscribirseACambiosDeFavoritos(() => {
@@ -172,6 +186,54 @@ export default function Profile() {
     setMostrarSelectorTema(false);
   };
 
+  const actualizarPreferenciasNotificaciones = (cambios: Partial<NotificationPreferences>) => {
+    const nuevas = guardarPreferenciasNotificaciones(cambios);
+    setPreferenciasNotificaciones(nuevas);
+  };
+
+  const habilitarNotificacionesPush = async () => {
+    setHabilitandoPush(true);
+    setMensajePush("");
+
+    try {
+      // En mobile (Capacitor), registrar directamente sin pedir permisos del navegador
+      if (Capacitor.isNativePlatform()) {
+        if (usuarioSesion?.id) {
+          const resultado = await registrarDispositivoPush(usuarioSesion.id);
+          console.log("Resultado registro push nativo:", resultado);
+
+          if (resultado.ok) {
+            actualizarPreferenciasNotificaciones({ browserNotifications: true });
+            setMensajePush("✓ Notificaciones push activadas correctamente");
+          } else {
+            setMensajePush(`Error: ${resultado.error}`);
+          }
+        } else {
+          setMensajePush("⚠ No se encontró ID de usuario");
+        }
+      } else {
+        // En web, pedir permisos del navegador
+        const permiso = await solicitarPermisoNotificaciones();
+        console.log("Permiso de notificaciones web:", permiso);
+
+        if (permiso === "granted") {
+          actualizarPreferenciasNotificaciones({ browserNotifications: true });
+          setMensajePush("✓ Notificaciones activadas correctamente");
+        } else if (permiso === "denied") {
+          setMensajePush("❌ Permisos denegados. Habilítalos en configuración del navegador.");
+        } else {
+          setMensajePush(`⚠ Estado de permisos: ${permiso}`);
+        }
+      }
+    } catch (error) {
+      const mensaje = error instanceof Error ? error.message : "Error al habilitar notificaciones";
+      console.error("Error:", error);
+      setMensajePush(mensaje);
+    } finally {
+      setHabilitandoPush(false);
+    }
+  };
+
   const favoritosIds = useMemo(() => {
     if (!esUsuarioActual) {
       return new Set<string>();
@@ -190,69 +252,7 @@ export default function Profile() {
     setFavoritosVersion((valorActual) => valorActual + 1);
   };
 
-  const guardarCredencialesCuenta = async () => {
-    if (!esUsuarioActual || !usuarioSesion?.id || guardandoCuenta) {
-      return;
-    }
-
-    const correoLimpio = nuevoCorreo.trim();
-    if (!correoLimpio) {
-      setErrorCuenta("Escribe un correo válido.");
-      return;
-    }
-
-    const quiereCambiarContrasena = nuevaContrasena.trim().length > 0 || confirmarNuevaContrasena.trim().length > 0;
-    if (quiereCambiarContrasena) {
-      if (nuevaContrasena !== confirmarNuevaContrasena) {
-        setErrorCuenta("Las contraseñas no coinciden.");
-        return;
-      }
-
-      if (nuevaContrasena.trim().length < 6) {
-        setErrorCuenta("La contraseña debe tener al menos 6 caracteres.");
-        return;
-      }
-    }
-
-    setGuardandoCuenta(true);
-    setErrorCuenta("");
-    setMensajeCuenta("");
-
-    const correoActual = usuarioSesion.email ?? "";
-    if (correoLimpio !== correoActual) {
-      const resultadoCorreo = await actualizarCorreo(correoLimpio);
-      if (resultadoCorreo.error) {
-        setErrorCuenta(resultadoCorreo.error);
-        setGuardandoCuenta(false);
-        return;
-      }
-    }
-
-    if (quiereCambiarContrasena) {
-      const resultadoContrasena = await actualizarContrasena(nuevaContrasena.trim());
-      if (resultadoContrasena.error) {
-        setErrorCuenta(resultadoContrasena.error);
-        setGuardandoCuenta(false);
-        return;
-      }
-    }
-
-    const cambiosCorreo = correoLimpio !== correoActual;
-    const cambiosContrasena = quiereCambiarContrasena;
-    if (cambiosCorreo && cambiosContrasena) {
-      setMensajeCuenta("Correo y contraseña actualizados.");
-    } else if (cambiosCorreo) {
-      setMensajeCuenta("Correo actualizado. Revisa tu correo si necesitas confirmar el cambio.");
-    } else if (cambiosContrasena) {
-      setMensajeCuenta("Contraseña actualizada correctamente.");
-    } else {
-      setMensajeCuenta("No había cambios para guardar.");
-    }
-
-    setNuevaContrasena("");
-    setConfirmarNuevaContrasena("");
-    setGuardandoCuenta(false);
-  };
+  
 
   const buscarPreferenciasGoogleBooks = async () => {
     const query = busquedaPreferencias.trim();
@@ -264,16 +264,18 @@ export default function Profile() {
     setErrorPreferencias("");
 
     try {
-      const response = await fetch(
-        `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=8`
-      );
+      const apiKey = import.meta.env.VITE_GOOGLE_BOOKS_API_KEY || "";
+      const keyParam = apiKey ? `&key=${apiKey}` : "";
+      const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=8${keyParam}`;
+      
+      const response = await fetch(url);
 
       if (!response.ok) {
-        throw new Error("google-books");
+        throw new Error("error-google-books");
       }
 
       const data = await response.json();
-      const items = Array.isArray(data?.items) ? (data.items as GoogleBooksItem[]) : [];
+      const items = Array.isArray(data?.items) ? (data.items as ItemGoogleBooks[]) : [];
 
       const encontrados = items
         .map((item) => {
@@ -290,8 +292,8 @@ export default function Profile() {
             title,
             author,
             cover:
-              item.volumeInfo?.imageLinks?.thumbnail ||
-              item.volumeInfo?.imageLinks?.smallThumbnail ||
+              normalizarUrlPortada(item.volumeInfo?.imageLinks?.thumbnail) ||
+              normalizarUrlPortada(item.volumeInfo?.imageLinks?.smallThumbnail) ||
               "https://placehold.co/72x108/EDE7DD/6B6962?text=Libro",
           };
         })
@@ -894,7 +896,7 @@ export default function Profile() {
         Boolean(syncChatsRequester.error);
       if (huboErroresSync) {
         window.alert(
-          "La foto se guardó en tu perfil, pero no se pudo sincronizar en todos tus libros/chats. Revisa las políticas UPDATE en Supabase."
+          "La foto se guardó en tu perfil, pero no se pudo sincronizar en todos tus libros/chats. Revisa las políticas de actualización en Supabase."
         );
       }
 
@@ -1038,74 +1040,77 @@ export default function Profile() {
         </div>
       )}
 
-      <div className="px-6 py-6 space-y-6">
-        <div className="bg-accent rounded-xl p-6 border border-border text-center">
-          <img
-            src={avatarMostrado}
-            alt={usuario.name}
-            className="w-24 h-24 rounded-full object-cover mx-auto mb-4 border-4 border-white shadow-md"
-          />
-
-          {esUsuarioActual && (
-            <>
-              <input
-                ref={inputAvatarRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  void cambiarFotoPerfil(e.target.files?.[0] ?? null);
-                  if (e.currentTarget) {
-                    e.currentTarget.value = "";
-                  }
-                }}
+      <div className="mx-auto w-full max-w-5xl px-4 py-6 space-y-6 sm:px-6">
+        <div className="bg-accent rounded-xl p-5 sm:p-6 border border-border">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
+            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              <img
+                src={avatarMostrado}
+                alt={usuario.name}
+                className="w-24 h-24 rounded-full object-cover border-4 border-white shadow-md"
               />
-              <button
-                onClick={() => inputAvatarRef.current?.click()}
-                disabled={subiendoAvatar}
-                className="mb-3 px-3 h-8 rounded-lg text-xs border border-border hover:bg-white transition-colors disabled:opacity-60"
-              >
-                {subiendoAvatar ? "Subiendo foto..." : "Cambiar foto de perfil"}
-              </button>
-            </>
-          )}
 
-          <h2 className="text-secondary mb-2">{usuario.name}</h2>
+              <div>
+                <h2 className="text-secondary mb-2">{usuario.name}</h2>
 
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <div className="flex items-center gap-1">
-              {[...Array(5)].map((_, i) => (
-                <Star
-                  key={i}
-                  className={`w-5 h-5 ${
-                    i < Math.floor(mediaMostrada)
-                      ? "fill-primary text-primary"
-                      : "text-muted"
-                  }`}
-                />
-              ))}
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <div className="flex items-center gap-1">
+                    {[...Array(5)].map((_, i) => (
+                      <Star
+                        key={i}
+                        className={`w-5 h-5 ${
+                          i < Math.floor(mediaMostrada)
+                            ? "fill-primary text-primary"
+                            : "text-muted"
+                        }`}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-sm text-muted-foreground">
+                    {totalMostrado > 0
+                      ? `${mediaMostrada} (${totalMostrado} valoraciones)`
+                      : "Sin valoraciones todavía"}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <MapPin className="w-4 h-4" />
+                  <span>{ciudadUbicacion}</span>
+                </div>
+              </div>
             </div>
-            <span className="text-sm text-muted-foreground">
-              {totalMostrado > 0
-                ? `${mediaMostrada} (${totalMostrado} valoraciones)`
-                : "Sin valoraciones todavía"}
-            </span>
-          </div>
 
-          <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-            <MapPin className="w-4 h-4" />
-            <span>{ciudadUbicacion}</span>
+            {esUsuarioActual && (
+              <div className="flex flex-col sm:items-end gap-2">
+                <input
+                  ref={inputAvatarRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    void cambiarFotoPerfil(e.target.files?.[0] ?? null);
+                    if (e.currentTarget) {
+                      e.currentTarget.value = "";
+                    }
+                  }}
+                />
+                <button
+                  onClick={() => inputAvatarRef.current?.click()}
+                  disabled={subiendoAvatar}
+                  className="px-3 h-8 rounded-lg text-xs border border-border hover:bg-white transition-colors disabled:opacity-60"
+                >
+                  {subiendoAvatar ? "Subiendo foto..." : "Cambiar foto de perfil"}
+                </button>
+                <button
+                  onClick={actualizarUbicacionPerfil}
+                  disabled={actualizandoUbicacion}
+                  className="px-3 h-8 rounded-lg text-xs border border-border hover:bg-white transition-colors disabled:opacity-60"
+                >
+                  {actualizandoUbicacion ? "Actualizando ubicación..." : "Actualizar ubicación real"}
+                </button>
+              </div>
+            )}
           </div>
-
-          {esUsuarioActual && (
-            <button
-              onClick={actualizarUbicacionPerfil}
-              disabled={actualizandoUbicacion}
-              className="mt-3 px-3 h-8 rounded-lg text-xs border border-border hover:bg-white transition-colors disabled:opacity-60"
-            >
-              {actualizandoUbicacion ? "Actualizando ubicación..." : "Actualizar ubicación real"}
-            </button>
-          )}
         </div>
 
         {!esUsuarioActual && usuarioSesion && usuarioSesion.id !== idUsuarioPerfil && (
@@ -1208,19 +1213,25 @@ export default function Profile() {
               )}
 
               {resultadosPreferencias.length > 0 && (
-                <div className="rounded-lg border border-border bg-background max-h-44 overflow-y-auto">
+                <div className="rounded-lg border border-border bg-background max-h-44 overflow-y-auto shadow-sm">
                   {resultadosPreferencias.map((resultado) => (
                     <button
+                      type="button"
                       key={`${resultado.title}-${resultado.author}`}
-                      onClick={() => agregarPreferenciaLibro(resultado.title)}
+                      onClick={() => {
+                        agregarPreferenciaLibro(resultado.title);
+                      }}
                       className="w-full px-3 py-2 text-left hover:bg-accent/60 transition-colors border-b last:border-b-0 border-border"
                     >
                       <div className="flex items-center gap-2">
-                        <img
-                          src={resultado.cover}
-                          alt={resultado.title}
-                          className="w-9 h-14 rounded object-cover border border-border"
-                        />
+                        <div className="w-9 h-14 shrink-0 overflow-hidden rounded border border-border bg-muted/40 flex items-center justify-center">
+                          <img
+                            src={resultado.cover}
+                            alt={resultado.title}
+                            className="w-full h-full object-cover"
+                            loading="lazy"
+                          />
+                        </div>
                         <div className="min-w-0">
                           <p className="text-sm text-foreground truncate">{resultado.title}</p>
                           <p className="text-xs text-muted-foreground truncate">{resultado.author}</p>
@@ -1261,7 +1272,7 @@ export default function Profile() {
         </div>
 
         {esUsuarioActual && (
-          <div className="grid grid-cols-1 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="bg-accent rounded-xl p-4 border border-border text-center">
               <div className="text-2xl text-primary mb-1">{librosUsuario.length}</div>
               <div className="text-xs text-muted-foreground">Libros publicados</div>
@@ -1321,7 +1332,7 @@ export default function Profile() {
               )}
             </div>
           ) : (
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
               {librosUsuario.map((book) => (
                 <div key={book.id} className="group">
                   <Link
@@ -1329,11 +1340,11 @@ export default function Profile() {
                     className="block"
                   >
                     <div className="relative aspect-[2/3] rounded-lg overflow-hidden shadow-md mb-2 group-hover:shadow-xl transition-shadow">
-                      <img
-                        src={book.cover}
-                        alt={book.title}
-                        className="w-full h-full object-cover"
-                      />
+                        <BookCover
+                          src={book.cover}
+                          alt={book.title}
+                          className="w-full h-full object-cover"
+                        />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                     </div>
                     <h4 className="text-sm text-foreground truncate mb-1">
@@ -1378,7 +1389,7 @@ export default function Profile() {
                   <div key={book.id} className="group relative">
                     <Link to={`/book/${book.id}`} className="block">
                       <div className="relative aspect-[2/3] rounded-lg overflow-hidden shadow-md mb-2 group-hover:shadow-xl transition-shadow">
-                        <img
+                        <BookCover
                           src={book.cover}
                           alt={book.title}
                           className="w-full h-full object-cover"
@@ -1411,12 +1422,46 @@ export default function Profile() {
           <div className="space-y-3">
             <h3 className="text-secondary">Configuración</h3>
             <div className="bg-accent rounded-xl border border-border divide-y divide-border">
-              <button className="w-full px-5 py-4 text-left hover:bg-white transition-colors rounded-t-xl">
-                <div className="text-foreground">Notificaciones</div>
-                <div className="text-sm text-muted-foreground mt-1">
-                  Gestiona tus preferencias de notificación
+              <div className="w-full px-5 py-4 text-left rounded-t-xl space-y-3">
+                <div>
+                  <div className="text-foreground">Notificaciones</div>
+                  <div className="text-sm text-muted-foreground mt-1">
+                    Activa avisos de chats y de libros cercanos.
+                  </div>
                 </div>
-              </button>
+
+                <div className="grid gap-2">
+                  <button
+                    type="button"
+                    onClick={() => actualizarPreferenciasNotificaciones({ chatMessages: !preferenciasNotificaciones.chatMessages })}
+                    className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground hover:bg-white transition-colors"
+                  >
+                    <span>Chats</span>
+                    <span>{preferenciasNotificaciones.chatMessages ? "Activado" : "Desactivado"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => actualizarPreferenciasNotificaciones({ nearbyBooks: !preferenciasNotificaciones.nearbyBooks })}
+                    className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground hover:bg-white transition-colors"
+                  >
+                    <span>Libros cercanos</span>
+                    <span>{preferenciasNotificaciones.nearbyBooks ? "Activado" : "Desactivado"}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={habilitarNotificacionesPush}
+                    disabled={habilitandoPush || preferenciasNotificaciones.browserNotifications}
+                    className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground hover:bg-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <span>Notificaciones Push</span>
+                    <span>{habilitandoPush ? "Activando..." : preferenciasNotificaciones.browserNotifications ? "Activado" : "Desactivado"}</span>
+                  </button>
+                </div>
+
+                {mensajePush && <p className="text-xs text-muted-foreground">{mensajePush}</p>}
+              </div>
               <button className="w-full px-5 py-4 text-left hover:bg-white transition-colors">
                 <div className="text-foreground">Privacidad y seguridad</div>
                 <div className="text-sm text-muted-foreground mt-1">
@@ -1457,78 +1502,7 @@ export default function Profile() {
               </button>
             </div>
 
-            <div className="bg-card rounded-xl border border-border p-4 space-y-3">
-              <h4 className="text-secondary">Cuenta</h4>
-              <div className="space-y-2">
-                <label className="block text-sm text-muted-foreground" htmlFor="perfil-email">
-                  Correo
-                </label>
-                <input
-                  id="perfil-email"
-                  type="email"
-                  value={nuevoCorreo}
-                  onChange={(e) => {
-                    setNuevoCorreo(e.target.value);
-                    setErrorCuenta("");
-                    setMensajeCuenta("");
-                  }}
-                  className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/20"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <div className="space-y-2">
-                  <label className="block text-sm text-muted-foreground" htmlFor="perfil-password">
-                    Nueva contraseña
-                  </label>
-                  <input
-                    id="perfil-password"
-                    type="password"
-                    value={nuevaContrasena}
-                    onChange={(e) => {
-                      setNuevaContrasena(e.target.value);
-                      setErrorCuenta("");
-                      setMensajeCuenta("");
-                    }}
-                    className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/20"
-                    minLength={6}
-                    placeholder="Deja vacío si no quieres cambiarla"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="block text-sm text-muted-foreground" htmlFor="perfil-password-confirmar">
-                    Confirmar contraseña
-                  </label>
-                  <input
-                    id="perfil-password-confirmar"
-                    type="password"
-                    value={confirmarNuevaContrasena}
-                    onChange={(e) => {
-                      setConfirmarNuevaContrasena(e.target.value);
-                      setErrorCuenta("");
-                      setMensajeCuenta("");
-                    }}
-                    className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/20"
-                    minLength={6}
-                  />
-                </div>
-              </div>
-
-              {errorCuenta && <p className="text-sm text-destructive">{errorCuenta}</p>}
-              {mensajeCuenta && <p className="text-sm text-secondary">{mensajeCuenta}</p>}
-
-              <button
-                type="button"
-                onClick={() => {
-                  void guardarCredencialesCuenta();
-                }}
-                disabled={guardandoCuenta}
-                className="w-full px-4 py-3 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-colors disabled:opacity-60"
-              >
-                {guardandoCuenta ? "Guardando cambios..." : "Guardar cambios de cuenta"}
-              </button>
-            </div>
+            
 
             <button
               onClick={() => {

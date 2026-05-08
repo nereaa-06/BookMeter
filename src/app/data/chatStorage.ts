@@ -7,6 +7,7 @@ const LEGACY_CURRENT_USER_ID = "current-user";
 const PENDING_CHAT_STORAGE_KEY = "bookmeter-pending-chat";
 const HIDDEN_CHAT_STORAGE_KEY = "bookmeter-hidden-chats";
 const CHAT_READ_STORAGE_KEY = "bookmeter-chat-read";
+const EVENTO_CHATS_CAMBIADOS = "bookmeter:chat-changed";
 
 export interface ChatUserIdentity {
   id: string;
@@ -50,7 +51,7 @@ export type DeleteAllChatsResult = {
   deletedCount: number;
 };
 
-type LocalChatMessage = {
+type MensajeChatLocal = {
   id: string;
   senderId: string;
   senderName: string;
@@ -59,7 +60,7 @@ type LocalChatMessage = {
   timestamp: string;
 };
 
-type LocalChat = {
+type ChatLocal = {
   id: string;
   book: {
     id: string;
@@ -68,11 +69,11 @@ type LocalChat = {
   };
   owner: ChatUserIdentity;
   requester: ChatUserIdentity;
-  messages: LocalChatMessage[];
+  messages: MensajeChatLocal[];
   createdAt: string;
 };
 
-type SupabaseChatRow = {
+type FilaChatSupabase = {
   id: string;
   libro_id: string;
   titulo_libro: string;
@@ -86,7 +87,7 @@ type SupabaseChatRow = {
   creado_en: string;
 };
 
-type SupabaseMessageRow = {
+type FilaMensajeSupabase = {
   id: string;
   id_chat: string;
   remitente_id: string;
@@ -96,7 +97,7 @@ type SupabaseMessageRow = {
   creado_en: string;
 };
 
-type PendingChat = {
+type ChatPendiente = {
   id: string;
   book: {
     id: string;
@@ -108,8 +109,12 @@ type PendingChat = {
   createdAt: string;
 };
 
-type HiddenChatsByUser = Record<string, string[]>;
-type ReadChatsByUser = Record<string, Record<string, string>>;
+type ChatsOcultosPorUsuario = Record<string, string[]>;
+type ChatsLeidosPorUsuario = Record<string, Record<string, string>>;
+type CambioChats = {
+  chatId?: string;
+  tabla?: "chats" | "messages" | "local";
+};
 
 function esTexto(valor: unknown): valor is string {
   return typeof valor === "string" && valor.trim().length > 0;
@@ -123,7 +128,7 @@ function generarIdChatPendiente(bookId: string, ownerId: string, requesterId: st
   return `pending-chat-${bookId}-${ownerId}-${requesterId}`;
 }
 
-function leerChatPendiente(): PendingChat | null {
+function leerChatPendiente(): ChatPendiente | null {
   if (typeof window === "undefined") {
     return null;
   }
@@ -134,7 +139,7 @@ function leerChatPendiente(): PendingChat | null {
       return null;
     }
 
-    const parsed = JSON.parse(raw) as PendingChat;
+    const parsed = JSON.parse(raw) as ChatPendiente;
     if (!parsed || !esTexto(parsed.id) || !parsed.book || !parsed.owner || !parsed.requester) {
       return null;
     }
@@ -145,12 +150,20 @@ function leerChatPendiente(): PendingChat | null {
   }
 }
 
-function guardarChatPendiente(chat: PendingChat): void {
+function guardarChatPendiente(chat: ChatPendiente): void {
   if (typeof window === "undefined") {
     return;
   }
 
   window.localStorage.setItem(PENDING_CHAT_STORAGE_KEY, JSON.stringify(chat));
+}
+
+function notificarCambioDeChats(detalle?: CambioChats): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.dispatchEvent(new CustomEvent(EVENTO_CHATS_CAMBIADOS, { detail: detalle }));
 }
 
 function limpiarChatPendiente(chatId?: string): void {
@@ -186,18 +199,18 @@ function normalizarIdentidad(raw: unknown): ChatUserIdentity | null {
   };
 }
 
-function normalizarMensajes(raw: unknown): LocalChatMessage[] {
+function normalizarMensajes(raw: unknown): MensajeChatLocal[] {
   if (!Array.isArray(raw)) {
     return [];
   }
 
   return raw
-    .map((item): LocalChatMessage | null => {
+    .map((item): MensajeChatLocal | null => {
       if (!item || typeof item !== "object") {
         return null;
       }
 
-      const mensaje = item as Partial<LocalChatMessage>;
+      const mensaje = item as Partial<MensajeChatLocal>;
       if (!esTexto(mensaje.id) || !esTexto(mensaje.senderId) || !esTexto(mensaje.senderName)) {
         return null;
       }
@@ -217,16 +230,16 @@ function normalizarMensajes(raw: unknown): LocalChatMessage[] {
         timestamp: fechaIso,
       };
     })
-    .filter((item): item is LocalChatMessage => Boolean(item))
+    .filter((item): item is MensajeChatLocal => Boolean(item))
     .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 }
 
-function normalizarLibro(raw: unknown): LocalChat["book"] | null {
+function normalizarLibro(raw: unknown): ChatLocal["book"] | null {
   if (!raw || typeof raw !== "object") {
     return null;
   }
 
-  const libro = raw as Partial<LocalChat["book"]>;
+  const libro = raw as Partial<ChatLocal["book"]>;
   if (!esTexto(libro.id) || !esTexto(libro.title)) {
     return null;
   }
@@ -238,7 +251,7 @@ function normalizarLibro(raw: unknown): LocalChat["book"] | null {
   };
 }
 
-function esChatDePruebaNoReal(chat: LocalChat): boolean {
+function esChatDePruebaNoReal(chat: ChatLocal): boolean {
   const nombreOwner = chat.owner.name.toLowerCase().trim();
   const nombreRequester = chat.requester.name.toLowerCase().trim();
 
@@ -251,7 +264,7 @@ function esChatDePruebaNoReal(chat: LocalChat): boolean {
   return idsDemo.has(chat.owner.id) || idsDemo.has(chat.requester.id);
 }
 
-function normalizarChatLocal(raw: unknown): LocalChat | null {
+function normalizarChatLocal(raw: unknown): ChatLocal | null {
   if (!raw || typeof raw !== "object") {
     return null;
   }
@@ -302,7 +315,7 @@ function normalizarChatLocal(raw: unknown): LocalChat | null {
   };
 }
 
-function leerChatsLocales(): LocalChat[] {
+function leerChatsLocales(): ChatLocal[] {
   if (typeof window === "undefined") {
     return [];
   }
@@ -320,7 +333,7 @@ function leerChatsLocales(): LocalChat[] {
 
     const chatsNormalizados = parsed
       .map((chat) => normalizarChatLocal(chat))
-      .filter((chat): chat is LocalChat => Boolean(chat))
+      .filter((chat): chat is ChatLocal => Boolean(chat))
       .filter((chat) => !esChatDePruebaNoReal(chat));
 
     // Si hubo migracion/limpieza, persistimos formato final para futuras cargas.
@@ -334,7 +347,7 @@ function leerChatsLocales(): LocalChat[] {
   }
 }
 
-function guardarChatsLocales(chats: LocalChat[]) {
+function guardarChatsLocales(chats: ChatLocal[]) {
   if (typeof window === "undefined") {
     return;
   }
@@ -342,7 +355,7 @@ function guardarChatsLocales(chats: LocalChat[]) {
   window.localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(chats));
 }
 
-function leerChatsOcultosPorUsuario(): HiddenChatsByUser {
+function leerChatsOcultosPorUsuario(): ChatsOcultosPorUsuario {
   if (typeof window === "undefined") {
     return {};
   }
@@ -358,13 +371,13 @@ function leerChatsOcultosPorUsuario(): HiddenChatsByUser {
       return {};
     }
 
-    return parsed as HiddenChatsByUser;
+    return parsed as ChatsOcultosPorUsuario;
   } catch {
     return {};
   }
 }
 
-function guardarChatsOcultosPorUsuario(data: HiddenChatsByUser): void {
+function guardarChatsOcultosPorUsuario(data: ChatsOcultosPorUsuario): void {
   if (typeof window === "undefined") {
     return;
   }
@@ -397,7 +410,7 @@ function ocultarMuchosChatsParaUsuario(currentUserId: string, chatIds: string[])
   guardarChatsOcultosPorUsuario(mapa);
 }
 
-function leerUltimasLecturas(): ReadChatsByUser {
+function leerUltimasLecturas(): ChatsLeidosPorUsuario {
   if (typeof window === "undefined") {
     return {};
   }
@@ -413,13 +426,13 @@ function leerUltimasLecturas(): ReadChatsByUser {
       return {};
     }
 
-    return parsed as ReadChatsByUser;
+    return parsed as ChatsLeidosPorUsuario;
   } catch {
     return {};
   }
 }
 
-function guardarUltimasLecturas(data: ReadChatsByUser): void {
+function guardarUltimasLecturas(data: ChatsLeidosPorUsuario): void {
   if (typeof window === "undefined") {
     return;
   }
@@ -441,7 +454,7 @@ function mostrarChatParaUsuario(currentUserId: string, chatId: string): boolean 
   return true;
 }
 
-function pasarChatLocalAChat(chat: LocalChat, currentUserId: string): ChatThreadItem {
+function pasarChatLocalAChat(chat: ChatLocal, currentUserId: string): ChatThreadItem {
   const usuarioEsOwner = chat.owner.id === currentUserId || chat.owner.id === LEGACY_CURRENT_USER_ID;
   const otherUser = usuarioEsOwner ? chat.requester : chat.owner;
 
@@ -483,7 +496,7 @@ function marcarChatsConMatch(chats: ChatThreadItem[]): ChatThreadItem[] {
   });
 }
 
-function esParticipanteDelChat(chat: LocalChat, currentUserId: string): boolean {
+function esParticipanteDelChat(chat: ChatLocal, currentUserId: string): boolean {
   return (
     chat.owner.id === currentUserId ||
     chat.requester.id === currentUserId ||
@@ -530,10 +543,10 @@ async function obtenerChatsSupabase(currentUserId: string): Promise<ChatThreadIt
     return null;
   }
 
-  const chatRows = chats as SupabaseChatRow[];
+  const chatRows = chats as FilaChatSupabase[];
   const chatIds = chatRows.map((chat) => chat.id);
 
-  let messagesByChatId = new Map<string, SupabaseMessageRow[]>();
+  let messagesByChatId = new Map<string, FilaMensajeSupabase[]>();
 
   if (chatIds.length > 0) {
     const { data: messages } = await supabase
@@ -544,12 +557,12 @@ async function obtenerChatsSupabase(currentUserId: string): Promise<ChatThreadIt
 
     if (messages) {
       messagesByChatId = messages.reduce((map, message) => {
-        const messageRow = message as SupabaseMessageRow;
+        const messageRow = message as FilaMensajeSupabase;
         const list = map.get(messageRow.id_chat) ?? [];
         list.push(messageRow);
         map.set(messageRow.id_chat, list);
         return map;
-      }, new Map<string, SupabaseMessageRow[]>());
+      }, new Map<string, FilaMensajeSupabase[]>());
     }
   }
 
@@ -596,7 +609,7 @@ async function obtenerChatsSupabase(currentUserId: string): Promise<ChatThreadIt
   });
 }
 
-export async function getChatsForUser(currentUserId: string): Promise<ChatThreadItem[]> {
+async function getChatsForUser(currentUserId: string): Promise<ChatThreadItem[]> {
   const chatsOcultos = obtenerSetChatsOcultos(currentUserId);
 
   const supabaseChats = await obtenerChatsSupabase(currentUserId);
@@ -616,7 +629,75 @@ export async function getChatsForUser(currentUserId: string): Promise<ChatThread
   );
 }
 
-export async function createOrGetChatForBook(
+async function getChatById(
+  chatId: string,
+  currentUserId: string
+): Promise<ChatThreadItem | null> {
+  if (!esTexto(chatId) || !esTexto(currentUserId)) {
+    return null;
+  }
+
+  if (isSupabaseConfigured && supabase) {
+    const { data: chat, error: chatError } = await supabase
+      .from("chats")
+      .select("*")
+      .eq("id", chatId)
+      .maybeSingle();
+
+    if (!chatError && chat) {
+      const chatRow = chat as FilaChatSupabase;
+      const esOwner = chatRow.propietario_id === currentUserId;
+      const otherUser = esOwner
+        ? {
+            id: chatRow.solicitante_id,
+            name: chatRow.nombre_solicitante,
+            avatar: chatRow.avatar_solicitante,
+          }
+        : {
+            id: chatRow.propietario_id,
+            name: chatRow.nombre_propietario,
+            avatar: chatRow.avatar_propietario,
+          };
+
+      const { data: messages } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("id_chat", chatId)
+        .order("creado_en", { ascending: true });
+
+      return {
+        id: chatRow.id,
+        book: {
+          id: chatRow.libro_id,
+          title: chatRow.titulo_libro,
+          cover: chatRow.portada_libro,
+        },
+        otherUser,
+        rolActual: esOwner ? "propietario" : "solicitante",
+        messages: (messages ?? []).map((message) => {
+          const messageRow = message as FilaMensajeSupabase;
+          return {
+            id: messageRow.id,
+            senderId: messageRow.remitente_id,
+            senderName: messageRow.nombre_remitente,
+            text: messageRow.texto,
+            imageUrl: messageRow.imagen_url ?? undefined,
+            timestamp: new Date(messageRow.creado_en),
+          };
+        }),
+      };
+    }
+  }
+
+  const localChat = leerChatsLocales().find((chat) => chat.id === chatId);
+  if (!localChat || !esParticipanteDelChat(localChat, currentUserId)) {
+    return null;
+  }
+
+  return pasarChatLocalAChat(localChat, currentUserId);
+}
+
+async function createOrGetChatForBook(
   book: Book,
   currentUser: ChatUserIdentity
 ): Promise<string> {
@@ -697,6 +778,7 @@ async function materializarChatPendiente(chatId: string): Promise<string> {
 
     if (!error && insertedChat?.id) {
       limpiarChatPendiente(chatId);
+      notificarCambioDeChats({ chatId: insertedChat.id, tabla: "chats" });
       return insertedChat.id;
     }
   }
@@ -714,7 +796,7 @@ async function materializarChatPendiente(chatId: string): Promise<string> {
     return existente.id;
   }
 
-  const newLocalChat: LocalChat = {
+  const newLocalChat: ChatLocal = {
     id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     book: pendiente.book,
     owner: pendiente.owner,
@@ -725,10 +807,11 @@ async function materializarChatPendiente(chatId: string): Promise<string> {
 
   guardarChatsLocales([newLocalChat, ...localChats]);
   limpiarChatPendiente(chatId);
+  notificarCambioDeChats({ chatId: newLocalChat.id, tabla: "local" });
   return newLocalChat.id;
 }
 
-export async function sendMessageToChat(
+async function sendMessageToChat(
   chatId: string,
   text: string,
   imageUrl: string | null,
@@ -755,6 +838,7 @@ export async function sendMessageToChat(
     });
 
     if (!error) {
+      notificarCambioDeChats({ chatId: chatIdReal, tabla: "messages" });
       return chatIdReal;
     }
   }
@@ -782,10 +866,11 @@ export async function sendMessageToChat(
   });
 
   guardarChatsLocales(chatsActualizados);
+  notificarCambioDeChats({ chatId: chatIdReal, tabla: "local" });
   return chatIdReal;
 }
 
-export async function deleteChatById(chatId: string, currentUserId: string): Promise<DeleteChatResult> {
+async function deleteChatById(chatId: string, currentUserId: string): Promise<DeleteChatResult> {
   if (!esTexto(chatId) || !esTexto(currentUserId)) {
     return { ok: false, canUndo: false };
   }
@@ -812,7 +897,7 @@ export async function deleteChatById(chatId: string, currentUserId: string): Pro
   return { ok: true, canUndo: true };
 }
 
-export function restoreHiddenChatForUser(currentUserId: string, chatId: string): boolean {
+function restoreHiddenChatForUser(currentUserId: string, chatId: string): boolean {
   if (!esTexto(currentUserId) || !esTexto(chatId)) {
     return false;
   }
@@ -820,7 +905,7 @@ export function restoreHiddenChatForUser(currentUserId: string, chatId: string):
   return mostrarChatParaUsuario(currentUserId, chatId);
 }
 
-export async function countUnreadChats(currentUserId: string): Promise<number> {
+async function countUnreadChats(currentUserId: string): Promise<number> {
   const chats = await getChatsForUser(currentUserId);
   const lecturas = leerUltimasLecturas();
   const lecturasUsuario = lecturas[currentUserId] ?? {};
@@ -846,7 +931,7 @@ export async function countUnreadChats(currentUserId: string): Promise<number> {
   }, 0);
 }
 
-export function markChatAsRead(currentUserId: string, chatId: string): void {
+function markChatAsRead(currentUserId: string, chatId: string): void {
   if (!esTexto(currentUserId) || !esTexto(chatId)) {
     return;
   }
@@ -860,7 +945,27 @@ export function markChatAsRead(currentUserId: string, chatId: string): void {
   guardarUltimasLecturas(lecturas);
 }
 
-export async function deleteAllChatsForUser(currentUserId: string): Promise<DeleteAllChatsResult> {
+function isChatUnreadForUser(currentUserId: string, chat: ChatThreadItem): boolean {
+  if (!esTexto(currentUserId)) {
+    return false;
+  }
+
+  const ultimo = chat.messages[chat.messages.length - 1];
+  if (!ultimo || ultimo.senderId === currentUserId) {
+    return false;
+  }
+
+  const lecturas = leerUltimasLecturas();
+  const leidoEn = lecturas[currentUserId]?.[chat.id];
+
+  if (!leidoEn) {
+    return true;
+  }
+
+  return new Date(ultimo.timestamp).getTime() > new Date(leidoEn).getTime();
+}
+
+async function deleteAllChatsForUser(currentUserId: string): Promise<DeleteAllChatsResult> {
   if (!esTexto(currentUserId)) {
     return { ok: false, deletedCount: 0 };
   }
@@ -892,6 +997,7 @@ export async function deleteAllChatsForUser(currentUserId: string): Promise<Dele
   const filtrados = locales.filter((chat) => !esParticipanteDelChat(chat, currentUserId));
   if (filtrados.length !== locales.length) {
     guardarChatsLocales(filtrados);
+    notificarCambioDeChats();
   }
 
   const pendiente = leerChatPendiente();
@@ -902,7 +1008,7 @@ export async function deleteAllChatsForUser(currentUserId: string): Promise<Dele
   return { ok: true, deletedCount: idsChatsActuales.length };
 }
 
-export function obtenerChatPendientePorId(chatId: string, currentUserId: string): ChatThreadItem | null {
+function obtenerChatPendientePorId(chatId: string, currentUserId: string): ChatThreadItem | null {
   if (!esChatPendiente(chatId)) {
     return null;
   }
@@ -924,7 +1030,7 @@ export function obtenerChatPendientePorId(chatId: string, currentUserId: string)
   };
 }
 
-export async function subirImagenDeChat(
+async function subirImagenDeChat(
   archivo: File,
   remitenteId: string
 ): Promise<string | null> {
@@ -940,9 +1046,41 @@ export async function subirImagenDeChat(
   }
 }
 
-export function subscribeToChatChanges(onChange: () => void): () => void {
+function obtenerChatIdDesdePayload(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+
+  const cambio = payload as {
+    new?: Record<string, unknown>;
+    old?: Record<string, unknown>;
+  };
+
+  const chatIdCandidato =
+    cambio.new?.id_chat ??
+    cambio.old?.id_chat ??
+    cambio.new?.id ??
+    cambio.old?.id;
+
+  return esTexto(chatIdCandidato) ? chatIdCandidato : undefined;
+}
+
+function subscribeToChatChanges(onChange: (detalle?: CambioChats) => void): () => void {
+  const listener = (event: Event) => {
+    const customEvent = event as CustomEvent<CambioChats>;
+    onChange(customEvent.detail);
+  };
+
+  if (typeof window !== "undefined") {
+    window.addEventListener(EVENTO_CHATS_CAMBIADOS, listener);
+  }
+
   if (!isSupabaseConfigured || !supabase) {
-    return () => {};
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener(EVENTO_CHATS_CAMBIADOS, listener);
+      }
+    };
   }
 
   const supabaseClient = supabase;
@@ -952,25 +1090,33 @@ export function subscribeToChatChanges(onChange: () => void): () => void {
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "chats" },
-      () => {
-        onChange();
+      (payload) => {
+        const detalle = { chatId: obtenerChatIdDesdePayload(payload), tabla: "chats" as const };
+        notificarCambioDeChats(detalle);
+        onChange(detalle);
       }
     )
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "messages" },
-      () => {
-        onChange();
+      (payload) => {
+        const detalle = { chatId: obtenerChatIdDesdePayload(payload), tabla: "messages" as const };
+        notificarCambioDeChats(detalle);
+        onChange(detalle);
       }
     )
     .subscribe();
 
   return () => {
+    if (typeof window !== "undefined") {
+      window.removeEventListener(EVENTO_CHATS_CAMBIADOS, listener);
+    }
     void supabaseClient.removeChannel(channel);
   };
 }
 
 export const obtenerChatsDelUsuario = getChatsForUser;
+export const obtenerChatDelUsuarioPorId = getChatById;
 export const crearOAbrirChatPorLibro = createOrGetChatForBook;
 export const enviarMensajeAlChat = sendMessageToChat;
 export const subirFotoAlChat = subirImagenDeChat;
@@ -981,3 +1127,5 @@ export const restaurarChatOculto = restoreHiddenChatForUser;
 export const borrarTodosLosChats = deleteAllChatsForUser;
 export const contarChatsNoLeidos = countUnreadChats;
 export const marcarChatComoLeido = markChatAsRead;
+export const esChatNoLeidoParaUsuario = isChatUnreadForUser;
+

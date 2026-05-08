@@ -16,6 +16,7 @@ export interface Book {
   title: string;
   author: string;
   cover: string;
+  imagenesAdicionales?: string[];
   synopsis: string;
   condition: string;
   status: "disponible" | "reservado" | "intercambiado";
@@ -26,20 +27,6 @@ export interface Book {
     lat: number;
     lng: number;
   };
-}
-
-export interface Message {
-  id: string;
-  senderId: string;
-  text: string;
-  timestamp: Date;
-}
-
-export interface Chat {
-  id: string;
-  book: Book;
-  otherUser: User;
-  messages: Message[];
 }
 
 export const currentUser: User = {
@@ -55,7 +42,7 @@ export const currentUser: User = {
   }
 };
 
-export const mockUsers: User[] = [
+const mockUsers: User[] = [
   {
     id: "1",
     name: "Carlos Ruiz",
@@ -194,71 +181,5 @@ export const mockBooks: Book[] = [
     owner: mockUsers[3],
     distance: 1.5,
     location: { lat: 40.4220, lng: -3.7080 }
-  }
-];
-
-export const currentUserBooks: Book[] = [
-  {
-    id: "user-1",
-    title: "Don Quijote de la Mancha",
-    author: "Miguel de Cervantes",
-    cover: "https://images.unsplash.com/photo-1516979187457-637abb4f9353?w=400&h=600&fit=crop",
-    synopsis: "Las aventuras del ingenioso hidalgo que confunde molinos con gigantes y la realidad con la ficción.",
-    condition: "Buen estado",
-    status: "disponible",
-    isbn: "9788424936464",
-    owner: currentUser,
-    distance: 0,
-    location: currentUser.location
-  },
-  {
-    id: "user-2",
-    title: "La casa de los espíritus",
-    author: "Isabel Allende",
-    cover: "https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=400&h=600&fit=crop",
-    synopsis: "La saga de una familia chilena a través de varias generaciones, mezclando lo político con lo sobrenatural.",
-    condition: "Como nuevo",
-    status: "disponible",
-    isbn: "9788497592703",
-    owner: currentUser,
-    distance: 0,
-    location: currentUser.location
-  },
-  {
-    id: "user-3",
-    title: "Crónica de una muerte anunciada",
-    author: "Gabriel García Márquez",
-    cover: "https://images.unsplash.com/photo-1519682337058-a94d519337bc?w=400&h=600&fit=crop",
-    synopsis: "Un relato sobre un asesinato que todo el pueblo sabía que iba a ocurrir pero nadie pudo evitar.",
-    condition: "Usado - Buen estado",
-    status: "disponible",
-    isbn: "9780307475497",
-    owner: currentUser,
-    distance: 0,
-    location: currentUser.location
-  }
-];
-
-export const googleBooksSearchResults = [
-  {
-    isbn: "9788420412962",
-    title: "Rayuela",
-    author: "Julio Cortázar",
-    cover: "https://images.unsplash.com/photo-1524578271613-d550eacf6090?w=400&h=600&fit=crop",
-    synopsis: "Una novela experimental que puede leerse de múltiples maneras, siguiendo a un escritor argentino en París en busca del sentido de la vida."
-  },
-  {
-    isbn: "9780062316097",
-    title: "Sapiens",
-    author: "Yuval Noah Harari",
-    cover: "https://images.unsplash.com/photo-1532012197267-da84d127e765?w=400&h=600&fit=crop",
-    synopsis: "Una audaz historia de la humanidad desde la Edad de Piedra hasta el siglo XXI, explorando cómo el Homo sapiens llegó a dominar el mundo."
-  },
-  {
-    isbn: "9788498386561",
-    title: "El nombre del viento",
-    author: "Patrick Rothfuss",
-    cover: "https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=400&h=600&fit=crop",
-    synopsis: "La historia de Kvothe, un joven que se convierte en el mago más famoso de su tiempo, narrada por él mismo en una posada remota."
   }
 ];

@@ -24,10 +24,3 @@ export function guardarPreferenciaPermisoUbicacion(preferencia: "aceptado" | "de
   window.localStorage.setItem(CLAVE_PERMISO_UBICACION, preferencia);
 }
 
-export function limpiarPreferenciaPermisoUbicacion() {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.removeItem(CLAVE_PERMISO_UBICACION);
-}

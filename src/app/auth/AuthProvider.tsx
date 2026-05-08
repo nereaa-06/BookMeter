@@ -38,18 +38,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    supabase.auth.getSession().then(({ data }) => {
-      setUsuario(data.session?.user ?? null);
-      setCargando(false);
+    let timeoutId: ReturnType<typeof setTimeout>;
 
-      if (data.session?.user) {
-        void adoptarDatosLegacy();
-      }
-    });
+    // Si tarda demasiado en devolver sesion, dejamos de esperar.
+    timeoutId = setTimeout(() => {
+      console.warn("Tiempo de espera agotado al pedir la sesión de Supabase");
+      setCargando(false);
+    }, 5000);
+
+    supabase.auth.getSession()
+      .then(({ data }) => {
+        clearTimeout(timeoutId);
+        setUsuario(data.session?.user ?? null);
+        setCargando(false);
+
+        if (data.session?.user) {
+          void adoptarDatosLegacy();
+        }
+      })
+      .catch((error) => {
+        clearTimeout(timeoutId);
+        console.error("Error obteniendo sesión:", error);
+        setCargando(false);
+      });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
+      clearTimeout(timeoutId);
       setUsuario(session?.user ?? null);
       setCargando(false);
 
@@ -59,6 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     return () => {
+      clearTimeout(timeoutId);
       subscription.unsubscribe();
     };
   }, []);
@@ -134,7 +151,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 export function useAuth() {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error("useAuth must be used within AuthProvider");
+    throw new Error("useAuth solo se puede usar dentro de AuthProvider");
   }
 
   return context;

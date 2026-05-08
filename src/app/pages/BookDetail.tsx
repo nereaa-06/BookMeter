@@ -1,11 +1,18 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router";
-import { ArrowLeft, MapPin, Star, MessageCircle, Heart } from "lucide-react";
+import { ArrowLeft, MapPin, Star, MessageCircle, Heart, ImagePlus, X } from "lucide-react";
 import type { Book } from "../data/mockData";
 import { currentUser } from "../data/mockData";
-import { obtenerLibroPorId, eliminarLibroSubido, actualizarEstadoLibro } from "../data/bookStorage";
+import {
+  obtenerLibroPorId,
+  eliminarLibroSubido,
+  actualizarEstadoLibro,
+  actualizarLibroSubido,
+  subirFotoDeLibro,
+} from "../data/bookStorage";
 import { crearOAbrirChatPorLibro } from "../data/chatStorage";
 import { useAuth } from "../auth/AuthProvider";
+import BookCover from "../components/BookCover";
 import {
   alternarFavorito,
   esLibroFavorito,
@@ -21,6 +28,20 @@ export default function BookDetail() {
   const [abriendoChat, setAbriendoChat] = useState(false);
   const [borrandoLibro, setBorrandoLibro] = useState(false);
   const [actualizandoEstado, setActualizandoEstado] = useState(false);
+  const [editandoLibro, setEditandoLibro] = useState(false);
+  const [guardandoEdicion, setGuardandoEdicion] = useState(false);
+  const [tituloEditado, setTituloEditado] = useState("");
+  const [autorEditado, setAutorEditado] = useState("");
+  const [isbnEditado, setIsbnEditado] = useState("");
+  const [estadoFisicoEditado, setEstadoFisicoEditado] = useState("");
+  const [descripcionEditada, setDescripcionEditada] = useState("");
+  const [mensajeEdicion, setMensajeEdicion] = useState("");
+  const [errorEdicion, setErrorEdicion] = useState("");
+  const [archivoPortadaEditada, setArchivoPortadaEditada] = useState<File | null>(null);
+  const [previewPortadaEditada, setPreviewPortadaEditada] = useState("");
+  const [imagenesExistentesEditadas, setImagenesExistentesEditadas] = useState<string[]>([]);
+  const [archivosNuevasImagenes, setArchivosNuevasImagenes] = useState<File[]>([]);
+  const [previewsNuevasImagenes, setPreviewsNuevasImagenes] = useState<string[]>([]);
   const [favoritosVersion, setFavoritosVersion] = useState(0);
 
   useEffect(() => {
@@ -59,6 +80,17 @@ export default function BookDetail() {
       desuscribir();
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (previewPortadaEditada) {
+        URL.revokeObjectURL(previewPortadaEditada);
+      }
+      previewsNuevasImagenes.forEach((url) => {
+        URL.revokeObjectURL(url);
+      });
+    };
+  }, [previewPortadaEditada, previewsNuevasImagenes]);
 
   if (cargandoLibro) {
     return (
@@ -146,6 +178,184 @@ export default function BookDetail() {
     setLibro((anterior) => (anterior ? { ...anterior, status: estado } : anterior));
   };
 
+  const iniciarEdicion = () => {
+    if (!libro) {
+      return;
+    }
+
+    setTituloEditado(libro.title);
+    setAutorEditado(libro.author);
+    setIsbnEditado(libro.isbn ?? "");
+    setEstadoFisicoEditado(libro.condition);
+    setDescripcionEditada(libro.synopsis);
+    setArchivoPortadaEditada(null);
+    setPreviewPortadaEditada("");
+    setArchivosNuevasImagenes([]);
+    setPreviewsNuevasImagenes([]);
+    setImagenesExistentesEditadas(Array.isArray(libro.imagenesAdicionales) ? [...libro.imagenesAdicionales] : []);
+    setErrorEdicion("");
+    setMensajeEdicion("");
+    setEditandoLibro(true);
+  };
+
+  const limpiarSeleccionImagenesEdicion = () => {
+    if (previewPortadaEditada) {
+      URL.revokeObjectURL(previewPortadaEditada);
+    }
+    previewsNuevasImagenes.forEach((url) => {
+      URL.revokeObjectURL(url);
+    });
+
+    setArchivoPortadaEditada(null);
+    setPreviewPortadaEditada("");
+    setImagenesExistentesEditadas([]);
+    setArchivosNuevasImagenes([]);
+    setPreviewsNuevasImagenes([]);
+  };
+
+  const cancelarEdicion = () => {
+    limpiarSeleccionImagenesEdicion();
+    setEditandoLibro(false);
+    setErrorEdicion("");
+  };
+
+  const elegirPortadaEdicion = (archivo: File | null) => {
+    if (!archivo) {
+      return;
+    }
+
+    if (previewPortadaEditada) {
+      URL.revokeObjectURL(previewPortadaEditada);
+    }
+
+    setArchivoPortadaEditada(archivo);
+    setPreviewPortadaEditada(URL.createObjectURL(archivo));
+    setErrorEdicion("");
+  };
+
+  const elegirImagenesAdicionalesEdicion = (lista: FileList | null) => {
+    if (!lista || lista.length === 0) {
+      return;
+    }
+
+    const archivosSeleccionados = Array.from(lista);
+    const maximo = 6;
+    const disponibles = maximo - imagenesExistentesEditadas.length - archivosNuevasImagenes.length;
+
+    if (disponibles <= 0) {
+      setErrorEdicion("Solo puedes tener hasta 6 imagenes adicionales.");
+      return;
+    }
+
+    const archivosFinales = archivosSeleccionados.slice(0, disponibles);
+    if (archivosFinales.length < archivosSeleccionados.length) {
+      setErrorEdicion("Has superado el limite de 6 imagenes adicionales.");
+    } else {
+      setErrorEdicion("");
+    }
+
+    const nuevasPreviews = archivosFinales.map((archivo) => URL.createObjectURL(archivo));
+    setArchivosNuevasImagenes((previas) => [...previas, ...archivosFinales]);
+    setPreviewsNuevasImagenes((previas) => [...previas, ...nuevasPreviews]);
+  };
+
+  const quitarImagenExistenteEdicion = (index: number) => {
+    setImagenesExistentesEditadas((anteriores) => anteriores.filter((_, i) => i !== index));
+    setErrorEdicion("");
+  };
+
+  const quitarImagenNuevaEdicion = (index: number) => {
+    const previewAQuitar = previewsNuevasImagenes[index];
+    if (previewAQuitar) {
+      URL.revokeObjectURL(previewAQuitar);
+    }
+
+    setArchivosNuevasImagenes((anteriores) => anteriores.filter((_, i) => i !== index));
+    setPreviewsNuevasImagenes((anteriores) => anteriores.filter((_, i) => i !== index));
+    setErrorEdicion("");
+  };
+
+  const guardarEdicionLibro = async () => {
+    if (!libro || !usuarioSesion || !esLibroDelUsuario || guardandoEdicion) {
+      return;
+    }
+
+    const titulo = tituloEditado.trim();
+    const autor = autorEditado.trim();
+    const descripcion = descripcionEditada.trim();
+    const estadoFisico = estadoFisicoEditado.trim();
+    const isbn = isbnEditado.trim();
+
+    if (!titulo || !autor || !descripcion || !estadoFisico) {
+      setErrorEdicion("Completa titulo, autor, estado y descripcion.");
+      return;
+    }
+
+    setGuardandoEdicion(true);
+    setErrorEdicion("");
+    setMensajeEdicion("");
+
+    let portadaFinal = libro.cover;
+    if (archivoPortadaEditada) {
+      const portadaSubida = await subirFotoDeLibro(archivoPortadaEditada, usuarioSesion.id);
+      if (!portadaSubida) {
+        setGuardandoEdicion(false);
+        setErrorEdicion("No se pudo subir la nueva portada.");
+        return;
+      }
+      portadaFinal = portadaSubida;
+    }
+
+    const nuevasImagenesSubidas: string[] = [];
+    for (const archivo of archivosNuevasImagenes) {
+      const imagenSubida = await subirFotoDeLibro(archivo, usuarioSesion.id);
+      if (!imagenSubida) {
+        setGuardandoEdicion(false);
+        setErrorEdicion("No se pudieron subir todas las imagenes nuevas.");
+        return;
+      }
+      nuevasImagenesSubidas.push(imagenSubida);
+    }
+
+    const imagenesAdicionalesFinales = [...imagenesExistentesEditadas, ...nuevasImagenesSubidas].slice(0, 6);
+
+    const actualizado = await actualizarLibroSubido(libro.id, usuarioSesion.id, {
+      title: titulo,
+      author: autor,
+      synopsis: descripcion,
+      condition: estadoFisico,
+      isbn: isbn || undefined,
+      cover: portadaFinal,
+      imagenesAdicionales: imagenesAdicionalesFinales,
+    });
+
+    setGuardandoEdicion(false);
+
+    if (!actualizado) {
+      setErrorEdicion("No se pudo guardar la edición del libro.");
+      return;
+    }
+
+    setLibro((anterior) =>
+      anterior
+        ? {
+            ...anterior,
+            title: titulo,
+            author: autor,
+            cover: portadaFinal,
+            imagenesAdicionales: imagenesAdicionalesFinales,
+            synopsis: descripcion,
+            condition: estadoFisico,
+            isbn: isbn || undefined,
+          }
+        : anterior
+    );
+
+    limpiarSeleccionImagenesEdicion();
+    setMensajeEdicion("Cambios guardados.");
+    setEditandoLibro(false);
+  };
+
   if (!libro) {
     return (
       <div className="flex-1 flex items-center justify-center pb-16">
@@ -172,10 +382,11 @@ export default function BookDetail() {
   return (
     <div className="flex-1 flex flex-col pb-16 bg-background overflow-y-auto">
       <div className="relative">
-        <img
+        <BookCover
           src={libro.cover}
           alt={libro.title}
           className="w-full h-96 object-cover"
+          containerClassName="w-full h-96"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent"></div>
 
@@ -188,10 +399,11 @@ export default function BookDetail() {
 
         <div className="absolute bottom-0 left-0 right-0 p-6">
           <div className="flex gap-4 items-start">
-            <img
+            <BookCover
               src={libro.cover}
               alt={libro.title}
-              className="w-24 h-36 object-cover rounded-lg shadow-xl"
+              className="w-24 h-36 object-cover"
+              containerClassName="w-24 h-36 rounded-lg shadow-xl"
             />
             <div className="flex-1">
               <div className="flex items-start justify-between gap-3">
@@ -272,9 +484,180 @@ export default function BookDetail() {
         </div>
 
         <div className="bg-accent rounded-xl p-5 border border-border">
-          <h3 className="text-secondary mb-3">Sinopsis</h3>
+          <h3 className="text-secondary mb-3">Descripcion del libro</h3>
           <p className="text-muted-foreground leading-relaxed">{libro.synopsis}</p>
         </div>
+
+        {esLibroDelUsuario && (
+          <div className="bg-accent rounded-xl p-5 border border-border space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-secondary">Editar libro</h3>
+              {!editandoLibro && (
+                <button
+                  type="button"
+                  onClick={iniciarEdicion}
+                  className="px-3 py-1.5 rounded-lg text-xs border border-border hover:bg-white transition-colors"
+                >
+                  Editar datos
+                </button>
+              )}
+            </div>
+
+            {editandoLibro ? (
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={tituloEditado}
+                  onChange={(e) => setTituloEditado(e.target.value)}
+                  placeholder="Titulo"
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-white text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <input
+                  type="text"
+                  value={autorEditado}
+                  onChange={(e) => setAutorEditado(e.target.value)}
+                  placeholder="Autor"
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-white text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <input
+                  type="text"
+                  value={estadoFisicoEditado}
+                  onChange={(e) => setEstadoFisicoEditado(e.target.value)}
+                  placeholder="Estado fisico del libro"
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-white text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <input
+                  type="text"
+                  value={isbnEditado}
+                  onChange={(e) => setIsbnEditado(e.target.value)}
+                  placeholder="ISBN (opcional)"
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-white text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <textarea
+                  value={descripcionEditada}
+                  onChange={(e) => setDescripcionEditada(e.target.value)}
+                  placeholder="Descripcion del libro"
+                  rows={4}
+                  className="w-full px-3 py-2 rounded-lg border border-border bg-white text-sm outline-none resize-none focus:ring-2 focus:ring-primary/20"
+                />
+
+                <div className="space-y-2 pt-2 border-t border-border">
+                  <label className="text-xs text-muted-foreground block">Portada del libro</label>
+                  <BookCover
+                    src={previewPortadaEditada || libro.cover}
+                    alt={tituloEditado || libro.title}
+                    className="w-20 h-28 object-cover"
+                    containerClassName="w-20 h-28 rounded-md border border-border"
+                  />
+                  <label className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-border rounded-lg bg-white hover:shadow-sm transition-all cursor-pointer">
+                    <ImagePlus className="w-4 h-4" />
+                    <span className="text-xs text-foreground">Cambiar portada</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => elegirPortadaEdicion(e.target.files?.[0] ?? null)}
+                    />
+                  </label>
+                </div>
+
+                <div className="space-y-2 pt-2 border-t border-border">
+                  <label className="text-xs text-muted-foreground block">Imagenes adicionales (max 6)</label>
+                  <label className="w-full flex items-center justify-center gap-2 px-3 py-2 border border-border rounded-lg bg-white hover:shadow-sm transition-all cursor-pointer">
+                    <ImagePlus className="w-4 h-4" />
+                    <span className="text-xs text-foreground">Añadir imagenes</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => elegirImagenesAdicionalesEdicion(e.target.files)}
+                    />
+                  </label>
+
+                  {(imagenesExistentesEditadas.length > 0 || previewsNuevasImagenes.length > 0) && (
+                    <div className="grid grid-cols-3 gap-2">
+                      {imagenesExistentesEditadas.map((url, index) => (
+                        <div key={`existente-${url}-${index}`} className="relative aspect-[3/4] rounded-md border border-border overflow-hidden bg-muted/40">
+                          <img src={url} alt={`Imagen existente ${index + 1}`} className="w-full h-full object-contain" />
+                          <button
+                            type="button"
+                            onClick={() => quitarImagenExistenteEdicion(index)}
+                            className="absolute top-1 right-1 p-1 rounded-full bg-black/70 text-white hover:bg-black/85"
+                            aria-label={`Quitar imagen existente ${index + 1}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+
+                      {previewsNuevasImagenes.map((url, index) => (
+                        <div key={`nueva-${url}-${index}`} className="relative aspect-[3/4] rounded-md border border-border overflow-hidden bg-muted/40">
+                          <img src={url} alt={`Imagen nueva ${index + 1}`} className="w-full h-full object-contain" />
+                          <button
+                            type="button"
+                            onClick={() => quitarImagenNuevaEdicion(index)}
+                            className="absolute top-1 right-1 p-1 rounded-full bg-black/70 text-white hover:bg-black/85"
+                            aria-label={`Quitar imagen nueva ${index + 1}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {errorEdicion && <p className="text-sm text-destructive">{errorEdicion}</p>}
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={cancelarEdicion}
+                    className="flex-1 px-4 py-2 rounded-lg border border-border text-sm hover:bg-white transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void guardarEdicionLibro();
+                    }}
+                    disabled={guardandoEdicion}
+                    className="flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm hover:opacity-90 transition-colors disabled:opacity-60"
+                  >
+                    {guardandoEdicion ? "Guardando..." : "Guardar cambios"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Puedes editar titulo, autor, estado fisico, ISBN, descripcion y fotos de este libro.
+              </p>
+            )}
+
+            {mensajeEdicion && !editandoLibro && (
+              <p className="text-sm text-secondary">{mensajeEdicion}</p>
+            )}
+          </div>
+        )}
+
+        {Array.isArray(libro.imagenesAdicionales) && libro.imagenesAdicionales.length > 0 && (
+          <div className="bg-accent rounded-xl p-5 border border-border">
+            <h3 className="text-secondary mb-3">Imagenes subidas por el usuario</h3>
+            <div className="grid grid-cols-2 gap-3">
+              {libro.imagenesAdicionales.map((imagen, index) => (
+                <div key={`${imagen}-${index}`} className="aspect-[3/4] rounded-lg border border-border bg-muted/40 overflow-hidden">
+                  <img
+                    src={imagen}
+                    alt={`Imagen adicional del libro ${index + 1}`}
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {esLibroDelUsuario && (
           <div className="bg-accent rounded-xl p-5 border border-border">

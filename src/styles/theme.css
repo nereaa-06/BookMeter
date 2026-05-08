@@ -10,7 +10,7 @@
   --popover-foreground: #1F2937;
   --primary: #0F766E;
   --primary-foreground: #FFFFFF;
-  --secondary: #1E3A5F;
+  --secondary: #3A2755;
   --secondary-foreground: #FFFFFF;
   --muted: #E8EEF6;
   --muted-foreground: #64748B;
@@ -26,7 +26,7 @@
   --font-weight-normal: 400;
   --ring: #0F766E;
   --chart-1: #0F766E;
-  --chart-2: #1E3A5F;
+  --chart-2: #3A2755;
   --chart-3: #EA580C;
   --chart-4: #0EA5A4;
   --chart-5: #2563EB;
@@ -203,7 +203,7 @@
     font-family: var(--font-body);
     background-image:
       radial-gradient(circle at 10% 4%, rgba(15, 118, 110, 0.12), transparent 36%),
-      radial-gradient(circle at 88% 12%, rgba(30, 58, 95, 0.1), transparent 42%),
+      radial-gradient(circle at 88% 12%, rgba(58, 39, 85, 0.12), transparent 42%),
       radial-gradient(circle at 52% 100%, rgba(14, 165, 164, 0.08), transparent 50%);
     background-attachment: fixed;
   }

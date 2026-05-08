@@ -9,7 +9,7 @@ export type EstadoMapaGuardado = {
   zoomMapa: number;
 };
 
-export const MAPA_ESTADO_STORAGE_KEY = "bookmeter.mapa.estado";
+const MAPA_ESTADO_STORAGE_KEY = "bookmeter.mapa.estado";
 
 function esPosicionValida(valor: unknown): valor is PosicionUsuario {
   if (!valor || typeof valor !== "object") {

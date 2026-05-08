@@ -10,8 +10,10 @@ import {
   obtenerPreferenciaPermisoUbicacion,
 } from "../data/locationPermissionStorage";
 import { BrowserMultiFormatReader } from "@zxing/browser";
+import BookCover from "../components/BookCover";
+import { notificarLibroNuevo } from "../data/pushNotifications";
 
-interface SearchBook {
+interface LibroEnBusca {
   isbn?: string;
   title: string;
   author: string;
@@ -19,7 +21,7 @@ interface SearchBook {
   synopsis: string;
 }
 
-type GoogleBooksItem = {
+type ItemGoogleBooks = {
   volumeInfo?: {
     title?: string;
     authors?: string[];
@@ -57,6 +59,7 @@ export default function AddBook() {
       });
       setManualError("");
       setArchivoPortada(null);
+      setArchivosImagenesAdicionales([]);
       setScannerError("");
       setScannerEstado("Abriendo camara...");
       setCondition("good");
@@ -67,6 +70,8 @@ export default function AddBook() {
         URL.revokeObjectURL(previewPortada);
       }
       setPreviewPortada(null);
+      previewsImagenesAdicionales.forEach((url) => URL.revokeObjectURL(url));
+      setPreviewsImagenesAdicionales([]);
     };
 
     useEffect(() => {
@@ -77,10 +82,10 @@ export default function AddBook() {
     }, [location.search]);
   const [searchMode, setSearchMode] = useState<"scan" | "search" | "manual" | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchBook[]>([]);
+  const [searchResults, setSearchResults] = useState<LibroEnBusca[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
-  const [selectedBook, setSelectedBook] = useState<SearchBook | null>(null);
+  const [selectedBook, setSelectedBook] = useState<LibroEnBusca | null>(null);
   const [manualBook, setManualBook] = useState({
     title: "",
     author: "",
@@ -90,7 +95,10 @@ export default function AddBook() {
   });
   const [manualError, setManualError] = useState("");
   const [archivoPortada, setArchivoPortada] = useState<File | null>(null);
+  const [archivosImagenesAdicionales, setArchivosImagenesAdicionales] = useState<File[]>([]);
   const [previewPortada, setPreviewPortada] = useState<string | null>(null);
+  const [previewsImagenesAdicionales, setPreviewsImagenesAdicionales] = useState<string[]>([]);
+  const [errorImagenes, setErrorImagenes] = useState("");
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [scannerError, setScannerError] = useState("");
   const [scannerEstado, setScannerEstado] = useState("Abriendo camara...");
@@ -104,8 +112,40 @@ export default function AddBook() {
   const ultimoCodigoRef = useRef<string | null>(null);
 
   const COVER_POR_DEFECTO = "https://placehold.co/240x360/EDE7DD/6B6962?text=Sin+portada";
+  const PESO_MAXIMO_IMAGEN_MB = 5;
+  const PESO_MAXIMO_IMAGEN_BYTES = PESO_MAXIMO_IMAGEN_MB * 1024 * 1024;
 
-  const convertirItemsGoogleABooks = (items: GoogleBooksItem[]): SearchBook[] => {
+  const normalizarUrlPortada = (url?: string): string => {
+    if (!url) {
+      return "";
+    }
+
+    const urlHttps = url.replace(/^http:\/\//i, "https://");
+    return urlHttps;
+  };
+
+  const construirPortadaOpenLibrary = (isbn?: string): string | null => {
+    const isbnLimpio = isbn?.trim();
+    if (!isbnLimpio) {
+      return null;
+    }
+
+    return `https://covers.openlibrary.org/b/isbn/${encodeURIComponent(isbnLimpio)}-L.jpg?default=true`;
+  };
+
+  const validarArchivoImagen = (archivo: File): string | null => {
+    if (!archivo.type.startsWith("image/")) {
+      return `El archivo ${archivo.name} no es una imagen valida.`;
+    }
+
+    if (archivo.size > PESO_MAXIMO_IMAGEN_BYTES) {
+      return `La imagen ${archivo.name} supera ${PESO_MAXIMO_IMAGEN_MB} MB.`;
+    }
+
+    return null;
+  };
+
+  const convertirItemsGoogleABooks = (items: ItemGoogleBooks[]): LibroEnBusca[] => {
     return items
       .map((item) => {
         const volume = item?.volumeInfo ?? {};
@@ -115,10 +155,14 @@ export default function AddBook() {
 
         const isbn13 = identifiers.find((id) => id?.type === "ISBN_13")?.identifier;
         const isbn10 = identifiers.find((id) => id?.type === "ISBN_10")?.identifier;
-        const cover =
+        const isbnPrincipal = isbn13 || isbn10;
+        const coverGoogle = normalizarUrlPortada(
           volume.imageLinks?.thumbnail ||
           volume.imageLinks?.smallThumbnail ||
-          COVER_POR_DEFECTO;
+          undefined
+        );
+        const coverOpenLibrary = construirPortadaOpenLibrary(isbnPrincipal);
+        const cover = coverGoogle || coverOpenLibrary || COVER_POR_DEFECTO;
 
         if (!volume.title) {
           return null;
@@ -130,23 +174,28 @@ export default function AddBook() {
           author: Array.isArray(volume.authors) ? volume.authors.join(", ") : "Autor desconocido",
           cover,
           synopsis: volume.description || "Sin sinopsis disponible.",
-        } as SearchBook;
+        } as LibroEnBusca;
       })
-      .filter((book): book is SearchBook => Boolean(book));
+      .filter((book): book is LibroEnBusca => Boolean(book));
   };
 
-  const buscarGoogle = async (query: string, restringirIdioma: boolean): Promise<SearchBook[]> => {
+  const buscarGoogle = async (query: string, restringirIdioma: boolean): Promise<LibroEnBusca[]> => {
+    const apiKey = import.meta.env.VITE_GOOGLE_BOOKS_API_KEY || "";
     const langParam = restringirIdioma ? "&langRestrict=es" : "";
-    const response = await fetch(
-      `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=12${langParam}`
-    );
+    const keyParam = apiKey ? `&key=${apiKey}` : "";
+    const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=12${langParam}${keyParam}`;
+    
+    const response = await fetch(url);
 
     if (!response.ok) {
+      if (!apiKey) {
+        throw new Error("error-google-books-sin-clave");
+      }
       throw new Error("No se pudo consultar Google Books.");
     }
 
     const data = await response.json();
-    const items = Array.isArray(data?.items) ? (data.items as GoogleBooksItem[]) : [];
+    const items = Array.isArray(data?.items) ? (data.items as ItemGoogleBooks[]) : [];
     return convertirItemsGoogleABooks(items);
   };
 
@@ -194,8 +243,32 @@ export default function AddBook() {
   const escanearLibro = () => {
     setSearchMode("scan");
     setScannerError("");
-    setScannerEstado("Abriendo camara...");
+    setScannerEstado("Pidiendo acceso a la camara...");
     setIsScannerOpen(true);
+  };
+
+  const solicitarPermisoCamara = async (): Promise<boolean> => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setScannerError("Este dispositivo no soporta acceso a camara desde la app.");
+      setScannerEstado("Camara no disponible");
+      return false;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+        },
+        audio: false,
+      });
+
+      stream.getTracks().forEach((track) => track.stop());
+      return true;
+    } catch {
+      setScannerError("No diste permiso de camara. Activalo en ajustes para escanear ISBN.");
+      setScannerEstado("Permiso de camara denegado");
+      return false;
+    }
   };
 
   const detenerScanner = () => {
@@ -256,7 +329,7 @@ export default function AddBook() {
     void buscarEnGoogleBooks(isbn);
   };
 
-  const seleccionarLibro = (book: SearchBook) => {
+  const seleccionarLibro = (book: LibroEnBusca) => {
     setSelectedBook(book);
   };
 
@@ -285,6 +358,14 @@ export default function AddBook() {
       return;
     }
 
+    const errorValidacion = validarArchivoImagen(archivo);
+    if (errorValidacion) {
+      setErrorImagenes(errorValidacion);
+      return;
+    }
+
+    setErrorImagenes("");
+
     if (previewPortada) {
       URL.revokeObjectURL(previewPortada);
     }
@@ -294,13 +375,85 @@ export default function AddBook() {
     setPreviewPortada(urlTemporal);
   };
 
+  const elegirImagenesAdicionales = (archivos: FileList | null) => {
+    if (!archivos || archivos.length === 0) {
+      return;
+    }
+
+    const huecosActuales = Math.max(0, 6 - archivosImagenesAdicionales.length);
+    if (huecosActuales === 0) {
+      setErrorImagenes("Ya has llegado al maximo de 6 imagenes adicionales.");
+      return;
+    }
+
+    const nuevosArchivos = Array.from(archivos);
+    const archivosValidos: File[] = [];
+    const erroresValidacion: string[] = [];
+
+    for (const archivo of nuevosArchivos) {
+      const errorValidacion = validarArchivoImagen(archivo);
+      if (errorValidacion) {
+        erroresValidacion.push(errorValidacion);
+        continue;
+      }
+      archivosValidos.push(archivo);
+    }
+
+    if (archivosValidos.length === 0) {
+      setErrorImagenes(
+        erroresValidacion[0] ?? `No se pudieron añadir imagenes. Revisa formato y peso (max ${PESO_MAXIMO_IMAGEN_MB} MB).`
+      );
+      return;
+    }
+
+    setArchivosImagenesAdicionales((anteriores) => {
+      const huecosDisponibles = Math.max(0, 6 - anteriores.length);
+      const archivosParaAnadir = archivosValidos.slice(0, huecosDisponibles);
+      return [...anteriores, ...archivosParaAnadir];
+    });
+
+    setPreviewsImagenesAdicionales((anteriores) => {
+      const huecosDisponibles = Math.max(0, 6 - anteriores.length);
+      const archivosParaAnadir = archivosValidos.slice(0, huecosDisponibles);
+      const previewsNuevas = archivosParaAnadir.map((archivo) => URL.createObjectURL(archivo));
+      return [...anteriores, ...previewsNuevas];
+    });
+
+    const avisos: string[] = [];
+    if (erroresValidacion.length > 0) {
+      avisos.push("Algunas imagenes no se añadieron por formato o tamaño.");
+    }
+    if (archivosValidos.length > huecosActuales) {
+      avisos.push("Solo se añadieron imagenes hasta llegar al maximo de 6.");
+    }
+    setErrorImagenes(avisos.length > 0 ? avisos.join(" ") : "");
+  };
+
+  const quitarImagenAdicional = (indice: number) => {
+    setArchivosImagenesAdicionales((anteriores) =>
+      anteriores.filter((_, index) => index !== indice)
+    );
+
+    setPreviewsImagenesAdicionales((anteriores) => {
+      const urlAEliminar = anteriores[indice];
+      if (urlAEliminar) {
+        URL.revokeObjectURL(urlAEliminar);
+      }
+      return anteriores.filter((_, index) => index !== indice);
+    });
+
+    setErrorImagenes("");
+  };
+
   useEffect(() => {
     return () => {
       if (previewPortada) {
         URL.revokeObjectURL(previewPortada);
       }
+
+      previewsImagenesAdicionales.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [previewPortada]);
+  }, [previewPortada, previewsImagenesAdicionales]);
 
   useEffect(() => {
     if (!isScannerOpen) {
@@ -308,48 +461,58 @@ export default function AddBook() {
       return;
     }
 
-    detenerScanner();
-    const lector = new BrowserMultiFormatReader();
-    lectorScannerRef.current = lector;
-
     let activo = true;
     setScannerEstado("Pidiendo acceso a la camara...");
+    let lectorActivo: BrowserMultiFormatReader | null = null;
 
-    lector.decodeFromVideoDevice(undefined, videoScannerRef.current ?? undefined, (resultado, error, controles) => {
-      if (!activo) {
-        controles?.stop();
+    const iniciarScanner = async () => {
+      const permisoConcedido = await solicitarPermisoCamara();
+      if (!activo || !permisoConcedido) {
         return;
       }
 
-      if (controles && controlesScannerRef.current !== controles) {
-        controlesScannerRef.current?.stop();
-        controlesScannerRef.current = controles;
-      }
+      detenerScanner();
+      lectorActivo = new BrowserMultiFormatReader();
+      lectorScannerRef.current = lectorActivo;
+      setScannerEstado("Escaneando...");
 
-      if (resultado) {
-        setScannerEstado("Codigo detectado");
-        usarCodigoEscaneado(resultado.getText());
-        controles?.stop();
-        return;
-      }
+      lectorActivo.decodeFromVideoDevice(undefined, videoScannerRef.current ?? undefined, (resultado, error, controles) => {
+        if (!activo) {
+          controles?.stop();
+          return;
+        }
 
-      if (error && error.name !== "NotFoundException") {
-        setScannerError("No se pudo leer el codigo. Prueba con mejor luz o escribe el ISBN a mano.");
-      }
-    }).catch(() => {
-      if (activo) {
-        setScannerError("No se pudo abrir la camara. Comprueba el permiso del navegador.");
-        setScannerEstado("Camara no disponible");
-      }
-    });
+        if (controles && controlesScannerRef.current !== controles) {
+          controlesScannerRef.current?.stop();
+          controlesScannerRef.current = controles;
+        }
+
+        if (resultado) {
+          setScannerEstado("Codigo detectado");
+          usarCodigoEscaneado(resultado.getText());
+          controles?.stop();
+          return;
+        }
+
+        if (error && error.name !== "NotFoundException") {
+          setScannerError("No se pudo leer el codigo. Prueba con mejor luz o escribe el ISBN a mano.");
+        }
+      }).catch(() => {
+        if (activo) {
+          setScannerError("No se pudo abrir la camara. Comprueba los permisos en ajustes.");
+          setScannerEstado("Camara no disponible");
+        }
+      });
+    };
+
+    void iniciarScanner();
 
     return () => {
       activo = false;
       controlesScannerRef.current?.stop();
       controlesScannerRef.current = null;
-      if (lectorScannerRef.current === lector) {
-        lectorScannerRef.current = null;
-      }
+      lectorActivo = null;
+      lectorScannerRef.current = null;
     };
   }, [isScannerOpen]);
 
@@ -409,6 +572,17 @@ export default function AddBook() {
       portadaFinal = portadaSubida;
     }
 
+    const imagenesAdicionalesFinales: string[] = [];
+    for (const archivo of archivosImagenesAdicionales) {
+      const imagenSubida = await subirFotoDeLibro(archivo, duenoAutenticado.id);
+      if (!imagenSubida) {
+        setErrorPublicar("No se pudieron subir todas las imagenes adicionales.");
+        setPublicando(false);
+        return;
+      }
+      imagenesAdicionalesFinales.push(imagenSubida);
+    }
+
     await subirLibro(
       {
         ...selectedBook,
@@ -416,8 +590,20 @@ export default function AddBook() {
       },
       etiquetasEstado[condition] ?? condition,
       location,
-      duenoAutenticado
+      duenoAutenticado,
+      imagenesAdicionalesFinales
     );
+
+    void notificarLibroNuevo({
+      bookId: selectedBook.isbn ?? `${selectedBook.title}-${Date.now()}`,
+      bookTitle: selectedBook.title,
+      bookAuthor: selectedBook.author,
+      ownerName: duenoAutenticado.name,
+      ownerUserId: duenoAutenticado.id,
+      latitude: location.lat,
+      longitude: location.lng,
+    });
+
     setShowSuccess(true);
     setPublicando(false);
     setTimeout(() => {
@@ -578,10 +764,11 @@ export default function AddBook() {
                 onClick={() => seleccionarLibro(book)}
                 className="w-full flex gap-4 bg-accent rounded-xl p-4 border border-border hover:border-primary hover:shadow-md transition-all text-left"
               >
-                <img
+                <BookCover
                   src={book.cover}
                   alt={book.title}
-                  className="w-16 h-24 object-cover rounded-lg"
+                  className="w-16 h-24 object-cover"
+                  containerClassName="w-16 h-24 rounded-lg"
                 />
                 <div className="flex-1">
                   <h4 className="text-foreground mb-1">{book.title}</h4>
@@ -673,10 +860,11 @@ export default function AddBook() {
               <h3 className="text-secondary">Detalles del libro</h3>
 
               <div className="flex gap-4">
-                <img
+                <BookCover
                   src={previewPortada ?? selectedBook.cover}
                   alt={selectedBook.title}
-                  className="w-24 h-36 object-cover rounded-lg shadow-md"
+                  className="w-24 h-36 object-cover"
+                  containerClassName="w-24 h-36 rounded-lg shadow-md"
                 />
                 <div className="flex-1">
                   <h4 className="text-foreground mb-1">{selectedBook.title}</h4>
@@ -709,6 +897,55 @@ export default function AddBook() {
                 </label>
                 {archivoPortada && (
                   <p className="text-xs text-muted-foreground">Seleccionada: {archivoPortada.name}</p>
+                )}
+                {errorImagenes && (
+                  <p className="text-xs text-destructive">{errorImagenes}</p>
+                )}
+              </div>
+
+              <div className="pt-4 border-t border-border space-y-2">
+                <label className="text-sm text-foreground block">Imagenes adicionales del libro (opcional, max 6)</label>
+                <label className="w-full flex items-center justify-center gap-2 px-4 py-3 border border-border rounded-xl bg-white hover:shadow-sm transition-all cursor-pointer">
+                  <ImagePlus className="w-4 h-4" />
+                  <span className="text-sm text-foreground">Elegir imagenes</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => elegirImagenesAdicionales(e.target.files)}
+                  />
+                </label>
+                {archivosImagenesAdicionales.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Seleccionadas: {archivosImagenesAdicionales.length}
+                  </p>
+                )}
+
+                {previewsImagenesAdicionales.length > 0 && (
+                  <div className="grid grid-cols-3 gap-2 pt-1">
+                    {previewsImagenesAdicionales.map((url, index) => (
+                      <div key={`${url}-${index}`} className="relative aspect-[3/4] rounded-lg border border-border bg-muted/40 overflow-hidden">
+                        <img
+                          src={url}
+                          alt={`Imagen adicional ${index + 1}`}
+                          className="w-full h-full object-contain"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => quitarImagenAdicional(index)}
+                          className="absolute top-1 right-1 p-1 rounded-full bg-black/70 text-white hover:bg-black/85 transition-colors"
+                          aria-label={`Quitar imagen adicional ${index + 1}`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {errorImagenes && (
+                  <p className="text-xs text-destructive">{errorImagenes}</p>
                 )}
               </div>
             </div>
@@ -766,15 +1003,15 @@ export default function AddBook() {
       </div>
 
       {isScannerOpen && (
-        <div className="fixed inset-0 z-[2000] bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="w-full max-w-md bg-background rounded-3xl overflow-hidden shadow-2xl border border-border">
+        <div className="fixed inset-0 z-[2000] bg-black/80 backdrop-blur-sm flex items-start sm:items-center justify-center px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-[calc(env(safe-area-inset-top)+1rem)] sm:p-4">
+          <div className="w-full max-w-sm sm:max-w-md max-h-[86dvh] bg-background rounded-3xl overflow-hidden shadow-2xl border border-border flex flex-col">
             <div className="flex items-center justify-between px-4 py-3 bg-secondary text-white">
               <div>
                 <h3 className="text-white">Escanear ISBN</h3>
                 <p className="text-xs text-white/80">{scannerEstado}</p>
               </div>
               <button
-                onClick={cerrarEscaner}
+                onClick={() => cerrarEscaner()}
                 className="p-2 rounded-full hover:bg-white/10 transition-colors"
                 aria-label="Cerrar escáner"
               >
@@ -782,8 +1019,8 @@ export default function AddBook() {
               </button>
             </div>
 
-            <div className="p-4 space-y-4">
-              <div className="relative aspect-[3/4] rounded-2xl overflow-hidden bg-black border border-border">
+            <div className="p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] space-y-4 overflow-y-auto">
+              <div className="relative aspect-[4/3] max-h-[28dvh] rounded-2xl overflow-hidden bg-black border border-border">
                 <video
                   ref={videoScannerRef}
                   className="w-full h-full object-cover"
@@ -802,7 +1039,7 @@ export default function AddBook() {
 
               <div className="space-y-2">
                 <label className="text-sm text-foreground block">Si la cámara falla, escribe el ISBN</label>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <input
                     type="text"
                     value={searchQuery}
@@ -812,7 +1049,7 @@ export default function AddBook() {
                   />
                   <button
                     onClick={probarBusquedaManualISBN}
-                    className="px-4 py-3 rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-colors"
+                    className="w-full sm:w-auto px-4 py-3 rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-colors"
                   >
                     Buscar
                   </button>
@@ -820,7 +1057,7 @@ export default function AddBook() {
               </div>
 
               <button
-                onClick={cerrarEscaner}
+                onClick={() => cerrarEscaner()}
                 className="w-full px-4 py-3 rounded-xl bg-secondary text-white hover:opacity-90 transition-colors"
               >
                 Cerrar

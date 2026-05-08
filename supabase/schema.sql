@@ -163,6 +163,7 @@ create table if not exists public.books (
   estado text not null,
   disponibilidad text not null default 'disponible' check (disponibilidad in ('disponible', 'reservado', 'intercambiado')),
   isbn text,
+  imagenes_adicionales text[] not null default '{}',
   propietario_id text not null,
   nombre_propietario text not null,
   avatar_propietario text not null,
@@ -174,6 +175,7 @@ create table if not exists public.books (
 );
 
 alter table public.books add column if not exists disponibilidad text not null default 'disponible';
+alter table public.books add column if not exists imagenes_adicionales text[] not null default '{}';
 
 create index if not exists books_creado_en_idx on public.books (creado_en desc);
 create index if not exists books_propietario_id_idx on public.books (propietario_id);
@@ -454,6 +456,69 @@ create trigger trigger_perfiles_publicos_actualizado_en
 before update on public.perfiles_publicos
 for each row
 execute procedure public.actualizar_timestamp_perfiles_publicos();
+
+-- Tokens de notificaciones push por dispositivo
+create table if not exists public.push_device_tokens (
+  id uuid primary key default gen_random_uuid(),
+  usuario_id text not null,
+  token text not null unique,
+  plataforma text not null,
+  habilitado boolean not null default true,
+  creado_en timestamptz not null default now(),
+  actualizado_en timestamptz not null default now()
+);
+
+alter table public.push_device_tokens add column if not exists habilitado boolean not null default true;
+
+create index if not exists push_device_tokens_usuario_id_idx on public.push_device_tokens (usuario_id);
+create index if not exists push_device_tokens_habilitado_idx on public.push_device_tokens (habilitado);
+
+alter table public.push_device_tokens enable row level security;
+
+drop policy if exists "push_device_tokens_lectura_propietario" on public.push_device_tokens;
+create policy "push_device_tokens_lectura_propietario"
+on public.push_device_tokens
+for select
+to authenticated
+using (usuario_id = auth.uid()::text);
+
+drop policy if exists "push_device_tokens_insertar_propietario" on public.push_device_tokens;
+create policy "push_device_tokens_insertar_propietario"
+on public.push_device_tokens
+for insert
+to authenticated
+with check (usuario_id = auth.uid()::text);
+
+drop policy if exists "push_device_tokens_actualizar_propietario" on public.push_device_tokens;
+create policy "push_device_tokens_actualizar_propietario"
+on public.push_device_tokens
+for update
+to authenticated
+using (usuario_id = auth.uid()::text)
+with check (usuario_id = auth.uid()::text);
+
+drop policy if exists "push_device_tokens_borrar_propietario" on public.push_device_tokens;
+create policy "push_device_tokens_borrar_propietario"
+on public.push_device_tokens
+for delete
+to authenticated
+using (usuario_id = auth.uid()::text);
+
+create or replace function public.actualizar_timestamp_push_device_tokens()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.actualizado_en = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists trigger_push_device_tokens_actualizado_en on public.push_device_tokens;
+create trigger trigger_push_device_tokens_actualizado_en
+before update on public.push_device_tokens
+for each row
+execute procedure public.actualizar_timestamp_push_device_tokens();
 
 -- Buckets para imagenes
 insert into storage.buckets (id, name, public)
