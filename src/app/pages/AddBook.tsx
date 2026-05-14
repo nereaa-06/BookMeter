@@ -179,13 +179,13 @@ export default function AddBook() {
       .filter((book): book is LibroEnBusca => Boolean(book));
   };
 
-  const buscarGoogle = async (query: string, restringirIdioma: boolean): Promise<LibroEnBusca[]> => {
+  const buscarGoogle = async (query: string, restringirIdioma: boolean, signal?: AbortSignal): Promise<LibroEnBusca[]> => {
     const apiKey = import.meta.env.VITE_GOOGLE_BOOKS_API_KEY || "";
     const langParam = restringirIdioma ? "&langRestrict=es" : "";
     const keyParam = apiKey ? `&key=${apiKey}` : "";
     const url = `https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(query)}&maxResults=12${langParam}${keyParam}`;
-    
-    const response = await fetch(url);
+
+    const response = await fetch(url, { signal });
 
     if (!response.ok) {
       if (!apiKey) {
@@ -209,6 +209,9 @@ export default function AddBook() {
     setIsSearching(true);
     setSearchError("");
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
     try {
       const soloDigitos = textoLimpio.replace(/[^0-9Xx]/g, "");
       const queryPrincipal = /^(isbn:|intitle:|inauthor:)/i.test(textoLimpio)
@@ -217,21 +220,26 @@ export default function AddBook() {
           ? `isbn:${soloDigitos}`
           : textoLimpio;
 
-      let resultados = await buscarGoogle(queryPrincipal, true);
+      let resultados = await buscarGoogle(queryPrincipal, true, controller.signal);
 
       if (resultados.length === 0) {
-        resultados = await buscarGoogle(queryPrincipal, false);
+        resultados = await buscarGoogle(queryPrincipal, false, controller.signal);
       }
 
       if (resultados.length === 0 && queryPrincipal !== textoLimpio) {
-        resultados = await buscarGoogle(textoLimpio, false);
+        resultados = await buscarGoogle(textoLimpio, false, controller.signal);
       }
 
       setSearchResults(resultados);
-    } catch {
+    } catch (err) {
       setSearchResults([]);
-      setSearchError("No hemos podido cargar resultados. Intentalo de nuevo.");
+      if (err instanceof Error && err.name === "AbortError") {
+        setSearchError("La búsqueda tardó demasiado. Comprueba tu conexión e inténtalo de nuevo.");
+      } else {
+        setSearchError("No hemos podido cargar resultados. Inténtalo de nuevo.");
+      }
     } finally {
+      clearTimeout(timeoutId);
       setIsSearching(false);
     }
   };
@@ -741,8 +749,14 @@ export default function AddBook() {
             )}
 
             {!isSearching && searchError && (
-              <div className="bg-accent rounded-xl p-5 border border-border text-center text-destructive">
-                {searchError}
+              <div className="bg-accent rounded-xl p-5 border border-border text-center space-y-3">
+                <p className="text-destructive">{searchError}</p>
+                <button
+                  onClick={buscarLibro}
+                  className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm hover:opacity-90 transition-opacity"
+                >
+                  Reintentar
+                </button>
               </div>
             )}
 

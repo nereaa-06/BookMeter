@@ -3,6 +3,8 @@ import { useParams, useNavigate, Link } from "react-router";
 import { ArrowLeft, MapPin, Star, MessageCircle, Heart, ImagePlus, X } from "lucide-react";
 import type { Book } from "../data/mockData";
 import { currentUser } from "../data/mockData";
+import { calcularDistanciaKm } from "../lib/geoUtils";
+import { obtenerPreferenciaPermisoUbicacion } from "../data/locationPermissionStorage";
 import {
   obtenerLibroPorId,
   eliminarLibroSubido,
@@ -43,6 +45,7 @@ export default function BookDetail() {
   const [archivosNuevasImagenes, setArchivosNuevasImagenes] = useState<File[]>([]);
   const [previewsNuevasImagenes, setPreviewsNuevasImagenes] = useState<string[]>([]);
   const [favoritosVersion, setFavoritosVersion] = useState(0);
+  const [distanciaReal, setDistanciaReal] = useState<number | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -80,6 +83,25 @@ export default function BookDetail() {
       desuscribir();
     };
   }, []);
+
+  useEffect(() => {
+    if (!libro) return;
+
+    const preferencia = obtenerPreferenciaPermisoUbicacion();
+    if (preferencia !== "aceptado" || !navigator.geolocation) return;
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const distancia = calcularDistanciaKm(
+          { lat: pos.coords.latitude, lng: pos.coords.longitude },
+          libro.location
+        );
+        setDistanciaReal(distancia);
+      },
+      () => { /* sin permiso o error, se queda la distancia del libro */ },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  }, [libro]);
 
   useEffect(() => {
     return () => {
@@ -426,7 +448,7 @@ export default function BookDetail() {
               </div>
               <div className="flex items-center gap-2 text-sm">
                 <MapPin className="w-4 h-4 text-primary" />
-                <span className="text-primary">Aprox. {libro.distance} km de distancia</span>
+                <span className="text-primary">Aprox. {distanciaReal ?? libro.distance} km de distancia</span>
               </div>
               <p className="text-xs text-secondary mt-2">Estado: {textoEstado(libro.status)}</p>
             </div>
@@ -478,7 +500,7 @@ export default function BookDetail() {
             )}
             <div className="flex justify-between py-2">
               <span className="text-muted-foreground">Distancia aproximada</span>
-              <span className="text-foreground">{libro.distance} km</span>
+              <span className="text-foreground">{distanciaReal ?? libro.distance} km</span>
             </div>
           </div>
         </div>
